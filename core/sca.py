@@ -15,21 +15,23 @@ import tempfile
 
 from . import nvd
 
-OPENSCA_BIN = os.environ.get("OPENSCA_BIN") or ""
-if not OPENSCA_BIN:
-    _here = pathlib.Path(__file__).resolve()
-    for _base in (_here.parents[2], _here.parents[3]):
+def opensca_bin() -> str:
+    env = os.environ.get("OPENSCA_BIN")
+    if env:
+        return env
+    here = pathlib.Path(__file__).resolve()
+    for base in (here.parents[2], here.parents[3]):
         for name in ("opensca-cli.exe", "opensca-cli"):
-            cand = _base / ".work" / "opensca" / "bin" / name
+            cand = base / ".work" / "opensca" / "bin" / name
             if cand.exists():
-                OPENSCA_BIN = str(cand)
-                break
+                return str(cand)
+    return ""
 
 _BUILD = ("pom.xml", "build.gradle", "requirements.txt")
 
 
 def available() -> bool:
-    return bool(OPENSCA_BIN) and pathlib.Path(OPENSCA_BIN).exists()
+    return bool(opensca_bin()) and pathlib.Path(opensca_bin()).exists()
 
 
 def _flatten(node: dict, depth: int = 0) -> list[dict]:
@@ -54,7 +56,7 @@ def run_opensca(root: str, timeout_s: int = 300) -> dict:
     os.close(fd)
     try:
         proc = subprocess.run(
-            [OPENSCA_BIN, "-path", str(pathlib.Path(root).resolve()), "-out", out],
+            [opensca_bin(), "-path", str(pathlib.Path(root).resolve()), "-out", out],
             capture_output=True, text=True, timeout=timeout_s,
             encoding="utf-8", errors="replace",
         )

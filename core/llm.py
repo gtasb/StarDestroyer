@@ -12,7 +12,8 @@ import urllib.request
 
 BASE_URL = os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com").rstrip("/")
 MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
-KEY = os.environ.get("DEEPSEEK_API_KEY", "")
+def key() -> str:
+    return os.environ.get("DEEPSEEK_API_KEY", "")
 
 SYSTEM = (
     "你是源码审计报告的撰写者。给你的是两个静态分析引擎已经产出的证据。"
@@ -22,12 +23,12 @@ SYSTEM = (
 
 
 def available() -> bool:
-    return bool(KEY)
+    return bool(key())
 
 
 def chat(system: str, user: str, max_chars: int = 12000) -> dict:
     """Single-turn call. Callers enforce their own output contract."""
-    if not KEY:
+    if not key():
         return {"ok": False, "error": "DEEPSEEK_API_KEY 未设置"}
     payload = {
         "model": MODEL,
@@ -41,7 +42,7 @@ def chat(system: str, user: str, max_chars: int = 12000) -> dict:
     req = urllib.request.Request(
         f"{BASE_URL}/chat/completions",
         data=json.dumps(payload).encode(),
-        headers={"Content-Type": "application/json", "Authorization": f"Bearer {KEY}"},
+        headers={"Content-Type": "application/json", "Authorization": f"Bearer {key()}"},
     )
     try:
         with urllib.request.urlopen(req, timeout=120) as resp:

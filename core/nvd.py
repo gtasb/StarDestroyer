@@ -16,17 +16,19 @@ from . import net
 
 BASE = os.environ.get("NVD_API_BASE", "https://services.nvd.nist.gov/rest/json/cves/2.0")
 CPE_BASE = os.environ.get("NVD_CPE_BASE", "https://services.nvd.nist.gov/rest/json/cpes/2.0")
-API_KEY = os.environ.get("NVD_API_KEY", "")
+def api_key() -> str:
+    return os.environ.get("NVD_API_KEY", "")
 CACHE_DIR = pathlib.Path(__file__).resolve().parents[1] / ".work" / "nvd"
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
-_MIN_GAP = 6.0 if not API_KEY else 1.0
+_MIN_GAP_KEYED, _MIN_GAP_ANON = 1.0, 6.0
 _last_call = [0.0]
 
 
 def _throttle() -> None:
+    limit = _MIN_GAP_KEYED if api_key() else _MIN_GAP_ANON
     gap = time.time() - _last_call[0]
-    if gap < _MIN_GAP:
-        time.sleep(_MIN_GAP - gap)
+    if gap < limit:
+        time.sleep(limit - gap)
     _last_call[0] = time.time()
 
 
@@ -39,8 +41,8 @@ def _get(params: dict, attempts: int = 3, base: str | None = None) -> dict:
     qs = urllib.parse.urlencode(params)
     url = f"{base or BASE}?{qs}"
     headers = {"User-Agent": "stardestroyer/0.1"}
-    if API_KEY:
-        headers["apiKey"] = API_KEY
+    if api_key():
+        headers["apiKey"] = api_key()
     _throttle()
     return net.request_json(url, headers=headers, attempts=attempts)
 

@@ -141,7 +141,7 @@ def validate(rules_dir: str | None = None) -> dict:
     fd, outp = tempfile.mkstemp(suffix=".json", prefix="ruleval-")
     probe = tempfile.mkdtemp(prefix="ruleval-src-")
     try:
-        subprocess.run([opengrep.BINARY, "scan", "-c", str(d), "--json", "-o", outp, probe],
+        subprocess.run([opengrep.binary(), "scan", "-c", str(d), "--json", "-o", outp, probe],
                        capture_output=True, text=True, timeout=120,
                        encoding="utf-8", errors="replace")
         doc = json.loads(pathlib.Path(outp).read_text(encoding="utf-8", errors="replace"))
