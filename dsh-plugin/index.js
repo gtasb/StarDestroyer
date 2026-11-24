@@ -163,6 +163,20 @@ export function apply(ctx) {
   }))
 
   ctx.tools.register(tool({
+    name: 'sd_logs',
+    description:
+      'Recent lines from the shared log file (.work/logs/stardestroyer.log) -- the same '
+      + 'lines the web console shows. Use it to see what a previous run actually did.',
+    parameters: {
+      n: { type: 'number', description: 'Lines to return, default 200' },
+      level: { type: 'string', description: 'Filter: INFO | WARN | ERROR | DEBUG' },
+    },
+    execute: (args, exec) => call('logs_tail', {
+      n: args.n ?? 200, level: args.level ?? '',
+    }, exec.signal),
+  }))
+
+  ctx.tools.register(tool({
     name: 'sd_web_search',
     description:
       'Look up how an N-day is reached (gadget, sink, exploit path) via Tavily. '

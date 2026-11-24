@@ -94,10 +94,14 @@ def run_scan(src: str, rules: str | None = None, timeout_s: int = 900,
     os.close(fd)
     argv, unsupported = build_args(src, out_json, rules, extra_rules)
     try:
+        from .. import logging
+        logging.debug("opengrep", "run", argv=" ".join(argv[-4:]))
         proc = subprocess.run(argv, capture_output=True, text=True, timeout=timeout_s,
                               encoding="utf-8", errors="replace")
         doc = json.loads(pathlib.Path(out_json).read_text(encoding="utf-8", errors="replace"))
         findings = parse_json(doc)
+        logging.info("opengrep", "scan done", exit=proc.returncode, findings=len(findings),
+                     interfile=doc.get("interfile_languages_used", []))
         return {
             "engine": "opengrep",
             "argv": argv,

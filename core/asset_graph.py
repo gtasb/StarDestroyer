@@ -122,7 +122,10 @@ def build(project_root: str, findings: list[dict] | None = None,
     db = pathlib.Path(db_path) if db_path else DB_DIR / f"{root.name}-{slug}.db"
     if db.exists():
         try:
-            db.unlink()
+            for suffix in ("", ".wal", ".lock"):
+                side = pathlib.Path(str(db) + suffix)
+                if side.exists():
+                    side.unlink()
         except OSError:
             db = db.with_name(f"{db.stem}-{int(time.time())}{db.suffix}")
     conn = _conn(db)

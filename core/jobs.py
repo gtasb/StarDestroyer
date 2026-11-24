@@ -43,6 +43,8 @@ def submit(command: str, cwd: str | None = None, label: str = "") -> dict:
         subprocess.Popen(argv, stdout=log, stderr=subprocess.STDOUT,
                          start_new_session=True, close_fds=True)
     log.close()
+    from . import logging
+    logging.info("jobs", "submitted", job_id=jid, label=label or "-")
     return {"job_id": jid}
 
 

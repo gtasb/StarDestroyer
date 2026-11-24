@@ -93,6 +93,11 @@ def kb_ingest(req: KbIngestReq) -> dict:
     return toolset.kb_ingest(req.path)
 
 
+@app.get("/api/logs")
+def logs(n: int = 200, level: str = "") -> dict:
+    return toolset.logs_tail(n, level)
+
+
 @app.get("/api/kb/docs")
 def kb_docs() -> dict:
     return toolset.kb_list()

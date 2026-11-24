@@ -145,4 +145,7 @@ def enrich(root: str, max_lookups: int = 12) -> dict:
         c["nvd_error"] = r.get("error")
     comps["lookups"] = lookups
     comps["skipped"] = skipped
+    from . import logging
+    logging.info("sca", "dependencies resolved", components=len(comps.get("components", [])),
+                 source=comps.get("source"), lookups=lookups, skipped=skipped)
     return comps

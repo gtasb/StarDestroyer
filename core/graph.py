@@ -99,7 +99,10 @@ def upsert_nodes_batch(conn: kuzu.Connection, label: str, rows: list[dict],
     q = f"UNWIND $rows AS row MERGE (n:{label} {{{pk}: row.{pk}}})"
     if sets:
         q += f" SET {sets}"
-    conn.execute(q, {"rows": rows})
+    # One statement for 400k rows blows the parameter buffer and the heap; a
+    # few thousand at a time keeps memory flat.
+    for i in range(0, len(rows), 4000):
+        conn.execute(q, {"rows": rows[i:i + 4000]})
     return len(rows)
 
 
@@ -112,7 +115,8 @@ def insert_edges_batch(conn: kuzu.Connection, rel: str, edges: list[dict],
     q = (f"UNWIND $edges AS e "
          f"MATCH (a:{src_label} {{id: e.{src_key}}}), (b:{dst_label} {{id: e.{dst_key}}}) "
          f"MERGE (a)-[r:{rel}]->(b){sets}")
-    conn.execute(q, {"edges": edges})
+    for i in range(0, len(edges), 4000):
+        conn.execute(q, {"edges": edges[i:i + 4000]})
     return len(edges)
 
 

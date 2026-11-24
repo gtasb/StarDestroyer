@@ -13,6 +13,7 @@ Ingest is serialised by the tabby_ingest pool: one Soot/JVM build at a time.
 """
 
 import csv
+import sys
 import os
 import pathlib
 
@@ -113,10 +114,23 @@ TEMPLATES = pathlib.Path(__file__).resolve().parents[1] / "templates" / "cypher"
 GADGET_ENTRIES = ["readObject", "readResolve", "readExternal", "readObjectNoData"]
 
 
+def _iter_rows(output_dir: str, key: str):
+    """Stream rows: a 400k-row CSV becomes a list that never fits comfortably."""
+    p = pathlib.Path(output_dir) / CSV_NAMES[key]
+    if not p.exists():
+        return
+    csv.field_size_limit(min(sys.maxsize, 2**31 - 1))
+    with p.open(newline="", encoding="utf-8", errors="replace") as fh:
+        for row in csv.DictReader(fh):
+            yield row
+
+
 def _rows(output_dir: str, key: str) -> list[dict]:
     p = pathlib.Path(output_dir) / CSV_NAMES[key]
     if not p.exists():
         return []
+    # Large projects emit signature/annotation fields past the 128 KiB default.
+    csv.field_size_limit(min(sys.maxsize, 2**31 - 1))
     with p.open(newline="", encoding="utf-8", errors="replace") as fh:
         return list(csv.DictReader(fh))
 
@@ -139,20 +153,53 @@ def load_graph(output_dir: str, db_path: str) -> dict:
         "id": r["ID"], "name": r.get("NAME", ""), "cls": r.get("CLASSNAME", ""),
         "sig": r.get("SIGNATURE", ""), "vul": r.get("VUL", "") or "",
         "is_sink": r.get("IS_SINK", ""), "serial": r.get("IS_SERIALIZABLE", ""),
-    } for r in _rows(output_dir, "METHODS")]
+    } for r in _iter_rows(output_dir, "METHODS")]
     classes = [{
         "id": r["ID"], "name": r.get("NAME", ""),
         "serial": r.get("IS_SERIALIZABLE", ""), "super": r.get("SUPER_CLASS", ""),
-    } for r in _rows(output_dir, "CLASSES")]
+    } for r in _iter_rows(output_dir, "CLASSES")]
     calls = [{
         "src": r["SOURCE"], "dst": r["TARGET"],
         "line": int(r["LINE_NUM"]) if r.get("LINE_NUM", "").isdigit() else 0,
-    } for r in _rows(output_dir, "CALL") if r["SOURCE"] != r["TARGET"]]
+    } for r in _iter_rows(output_dir, "CALL") if r["SOURCE"] != r["TARGET"]]
 
-    n_methods = graph.upsert_nodes_batch(conn, "Method", methods,
-                                         ["name", "cls", "sig", "vul", "is_sink", "serial"])
-    n_classes = graph.upsert_nodes_batch(conn, "Class", classes, ["name", "serial", "super"])
-    n_calls = graph.insert_edges_batch(conn, "CALL", calls, "Method", "Method", props=["line"])
+    from .. import logging
+    def _drain(rows, label, props, rel=False, edges_props=None):
+        batch, n = [], 0
+        for row in rows:
+            batch.append(row)
+            if len(batch) >= 20000:
+                if rel:
+                    graph.insert_edges_batch(conn, label, batch, "Method", "Method",
+                                             props=edges_props)
+                else:
+                    graph.upsert_nodes_batch(conn, label, batch, props)
+                n += len(batch)
+                batch = []
+        if batch:
+            if rel:
+                graph.insert_edges_batch(conn, label, batch, "Method", "Method",
+                                         props=edges_props)
+            else:
+                graph.upsert_nodes_batch(conn, label, batch, props)
+            n += len(batch)
+        return n
+
+    method_ids: set[str] = set()
+
+    def _methods():
+        for row in methods:
+            method_ids.add(row["id"])
+            yield row
+
+    n_methods = _drain(_methods(), "Method", ["name", "cls", "sig", "vul", "is_sink", "serial"])
+    n_classes = _drain(classes, "Class", ["name", "serial", "super"])
+    # An edge whose endpoint is absent makes Kùzu's MERGE fail on an empty match.
+    n_calls = _drain((c for c in calls
+                      if c["src"] in method_ids and c["dst"] in method_ids),
+                     "CALL", None, rel=True, edges_props=["line"])
+    logging.info("tabby", "graph loaded", methods=n_methods, classes=n_classes,
+                 calls=n_calls)
     return {"conn": conn, "methods": n_methods, "classes": n_classes, "calls": n_calls}
 
 

@@ -8,7 +8,7 @@ import json
 import pathlib
 import time
 
-from . import agent, ledger, records, report, sarif, verdict
+from . import agent, ledger, logging, records, report, sarif, verdict
 from .engines import opengrep
 
 RULES = {
@@ -35,6 +35,8 @@ def scan(src: str, lang: str = "java", ai: bool = False, verify: bool = False,
         return {"ok": False, "error": f"暂不支持语言: {lang}，可选 {sorted(RULES)}"}
 
     started = time.time()
+    logging.info("pipeline", "scan start", path=src, lang=lang,
+                 project_rules=bool(extra_rules))
     res = opengrep.run_scan(src, rules=rules_for(lang),
                             extra_rules=[extra_rules] if extra_rules else None)
 
@@ -52,6 +54,9 @@ def scan(src: str, lang: str = "java", ai: bool = False, verify: bool = False,
         reportable = [r for r in reportable if r["status"] != "rejected"]
     ledger_doc = ledger.build(src, lang, res["findings"], ledger.EXTENSIONS)
 
+    logging.info("pipeline", "scan done", path=src, raw=res["total"],
+                 reportable=len(reportable), elapsed=round(time.time() - started, 2),
+                 engine_errors=len(res.get("errors", [])))
     scan_dir = SCANS_DIR / time.strftime("%Y%m%d-%H%M%S")
     scan_dir.mkdir(parents=True, exist_ok=True)
     (scan_dir / "findings.json").write_text(
@@ -124,6 +129,7 @@ def tabby_audit(target_jar: str, workdir: str | None = None, mode: str = "gadget
         return {"ok": False, "error": f"目标不存在: {target_jar}"}
 
     workdir = workdir or str(TABBY_WORK / jar.stem)
+    logging.info("tabby", "audit start", jar=jar.name, mode=mode, heap=heap)
     tabby.prepare_workspace(workdir, target=str(jar.resolve()), mode=mode)
     out_dir = pathlib.Path(workdir) / "output" / "dev"
 
@@ -132,10 +138,13 @@ def tabby_audit(target_jar: str, workdir: str | None = None, mode: str = "gadget
     csvs = list(out_dir.glob("GRAPHDB_PUBLIC_*.csv"))
     jar_mtime = jar.stat().st_mtime
     fresh = len(csvs) >= 7 and all(c.stat().st_mtime >= jar_mtime for c in csvs)
+    if fresh:
+        logging.info("tabby", "reusing csv", workdir=workdir, files=len(csvs))
     if not fresh:
         job = tabby.submit_build(workdir, heap=heap)
         st = jobs.wait(job["job_id"], timeout_s=wait_s)
         if st.get("state") == "running":
+            logging.warn("tabby", "build still running", job=job["job_id"], wait_s=wait_s)
             return {"ok": True, "pending": job["job_id"],
                     "hint": "建图超过等待窗口。完成后再次调用本工具即可，会复用已产出的 CSV",
                     "poll": f"job_status('{job['job_id']}')"}
@@ -143,8 +152,11 @@ def tabby_audit(target_jar: str, workdir: str | None = None, mode: str = "gadget
             return {"ok": False, "error": "Tabby 构建失败", "tail": st.get("tail")}
 
     db_path = pathlib.Path(workdir) / "cpg.db"
-    if db_path.exists():
-        db_path.unlink()  # a stale graph would answer for the previous jar
+    # A killed build leaves a WAL that makes the next open fail; drop both.
+    for suffix in ("", ".wal", ".lock"):
+        side = pathlib.Path(str(db_path) + suffix)
+        if side.exists():
+            side.unlink()
     g = tabby.load_graph(str(out_dir), str(db_path))
     chains = tabby.find_gadget_chains(g["conn"], limit=limit)
     recs = tabby.to_records(chains)

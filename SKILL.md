@@ -100,6 +100,13 @@ OBSERVED(5) > CONFIRMED(4) > DERIVED(3) > INFERRED(2) > REJECTED(1)
 
 幸存依赖按 CWE 映射到 sink 清单，再在源码里定位调用点（提示，不是证明）。
 
+## 日志
+
+- 单一出口 `core/logging.py`：写 `.work/logs/stardestroyer.log`，同时进 2000 条环形缓冲。
+- 控制台「日志」页读的是同一个文件——界面上看到的与落盘一致，不是另起一份。
+- 格式固定：`时间 级别 组件 事件  key=value`，可直接 grep。
+- 超过 5MB 轮转为 `.log.1`；写日志失败绝不影响被记录的操作本身。
+
 ## 硬规则
 
 1. 调用链只能来自引擎输出（`dataflow_trace` / 图查询结果），禁止编造。

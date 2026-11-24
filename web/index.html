@@ -154,7 +154,7 @@
   <div class="main">
     <header class="topbar">
       <div class="proj"><span class="dot" id="dot-proj"></span>本地项目</div>
-      <div class="tabs"><span class="tab active" data-view="overview">概览</span><span class="tab" data-view="graph">图谱</span><span class="tab" data-view="kb">知识库</span></div>
+      <div class="tabs"><span class="tab active" data-view="overview">概览</span><span class="tab" data-view="graph">图谱</span><span class="tab" data-view="kb">知识库</span><span class="tab" data-view="logs">日志</span></div>
       <div class="top-right">
         <span class="badge gray" id="pill-og">opengrep</span>
         <span class="badge gray" id="pill-tb">tabby</span>
@@ -270,6 +270,26 @@
           </section>
         </div>
       </div>
+    </main>
+
+    <main class="content" id="view-logs" hidden>
+      <div class="page-head">
+        <div>
+          <h1>日志</h1>
+          <p class="sub">与 .work/logs/stardestroyer.log 同源——界面上看到的和落盘的是同一份</p>
+        </div>
+        <div class="run-box">
+          <select id="log-level" style="height:38px;border:1px solid var(--line2);border-radius:8px;padding:0 10px;font:inherit;background:#fff">
+            <option value="">全部级别</option><option>INFO</option><option>WARN</option>
+            <option>ERROR</option><option>DEBUG</option>
+          </select>
+          <button id="log-refresh" class="btn">刷新</button>
+        </div>
+      </div>
+      <section class="card" style="margin-top:18px">
+        <div class="card-head"><h2>最近日志</h2><span class="link" id="log-file">—</span></div>
+        <pre id="log-lines" style="margin:0;padding:14px 18px;max-height:62vh;overflow:auto;font-size:12px;line-height:1.7;white-space:pre-wrap;color:#374151">（尚无日志）</pre>
+      </section>
     </main>
 
     <main class="content" id="view-kb" hidden>
@@ -468,7 +488,9 @@ function showView(v){
   $("#view-overview").hidden = v !== "overview";
   $("#view-graph").hidden = v !== "graph";
   $("#view-kb").hidden = v !== "kb";
+  $("#view-logs").hidden = v !== "logs";
   if (v === "kb") loadDocs();
+  if (v === "logs") { loadLogs(); startLogTimer(); } else { stopLogTimer(); }
 }
 
 /* ---------- asset graph ---------- */
@@ -605,6 +627,33 @@ $("#kb-preview").onclick = async () => {
 $("#kb-q").onkeydown = e => { if (e.key === "Enter") kbSearch(); };
 $("#kb-ingest").onclick = kbIngest;
 $("#g-build").onclick = buildGraph;
+
+/* ---------- logs ---------- */
+let logTimer = null;
+function startLogTimer(){ stopLogTimer(); logTimer = setInterval(loadLogs, 3000); }
+function stopLogTimer(){ if (logTimer) { clearInterval(logTimer); logTimer = null; } }
+async function loadLogs(){
+  const lvl = $("#log-level").value;
+  try {
+    const d = await (await fetch("/api/logs?n=300" + (lvl ? "&level=" + lvl : ""))).json();
+    $("#log-file").textContent = d.path || "";
+    const lines = d.lines || [];
+    $("#log-lines").innerHTML = lines.length
+      ? lines.map(colorize).join("")
+      : '<span style="color:#9aa1ab">（尚无日志）</span>';
+    $("#log-lines").scrollTop = $("#log-lines").scrollHeight;
+  } catch (e) {
+    $("#log-lines").textContent = "读取日志失败：" + e;
+  }
+}
+function colorize(line){
+  const c = line.includes(" ERROR ") ? "#c0392b"
+          : line.includes(" WARN ") ? "#9a6700"
+          : line.includes(" DEBUG ") ? "#9aa1ab" : "";
+  return `<div style="${c ? "color:" + c : ""}">${esc(line)}</div>`;
+}
+$("#log-refresh").onclick = loadLogs;
+$("#log-level").onchange = loadLogs;
 
 setMode("src"); health(); loadDocs(); setInterval(health, 20000);
 </script>

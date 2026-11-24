@@ -9,6 +9,7 @@ import json
 import pathlib
 
 from . import asset_graph, intel, jobs, kb, nvd, pipeline, pools, profile, rulegen, sca
+from . import logging
 from . import sca_triage
 
 
@@ -176,6 +177,11 @@ def job_status(job_id: str, tail: int = 40) -> dict:
     return jobs.status(job_id, tail=tail)
 
 
+def logs_tail(n: int = 200, level: str = "") -> dict:
+    """Recent lines from the shared log file (.work/logs/stardestroyer.log)."""
+    return logging.tail(n, level or None)
+
+
 def pool_stats() -> dict:
     return pools.stats()
 
@@ -200,5 +206,6 @@ TOOLS = [
     ("kb_list", kb_list, "Indexed documents."),
     ("submit_job", submit_job, "Run a long command detached."),
     ("job_status", job_status, "State, exit code and log tail."),
+    ("logs_tail", logs_tail, "Recent log lines from the shared log file."),
     ("pool_stats", pool_stats, "Free resource slots."),
 ]
