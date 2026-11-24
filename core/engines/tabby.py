@@ -19,14 +19,16 @@ import pathlib
 
 from .. import jobs
 
-JAR = os.environ.get("TABBY_JAR") or ""
-if not JAR:
-    _here = pathlib.Path(__file__).resolve()
-    for _base in (_here.parents[2], _here.parents[3]):
-        _cand = _base / ".work" / "tabby" / "dist" / "tabby.jar"
-        if _cand.exists():
-            JAR = str(_cand)
-            break
+def jar() -> str:
+    env = os.environ.get("TABBY_JAR")
+    if env:
+        return env
+    here = pathlib.Path(__file__).resolve()
+    for base in (here.parents[2], here.parents[3]):
+        cand = base / ".work" / "tabby" / "dist" / "tabby.jar"
+        if cand.exists():
+            return str(cand)
+    return ""
 
 SETTINGS_TEMPLATE = """\
 tabby.build.target                        = {target}
@@ -58,7 +60,7 @@ tabby.build.isNeedToProcessXml            = true
 
 
 def available() -> bool:
-    return bool(JAR) and pathlib.Path(JAR).exists()
+    return bool(jar()) and pathlib.Path(jar()).exists()
 
 
 def prepare_workspace(workdir: str, target: str, libraries: str = "",
@@ -68,7 +70,7 @@ def prepare_workspace(workdir: str, target: str, libraries: str = "",
     (d / "config").mkdir(parents=True, exist_ok=True)
     (d / "output").mkdir(parents=True, exist_ok=True)
     rules = (rules_dir or os.environ.get("TABBY_RULES")
-             or str(pathlib.Path(JAR).parent / "rules"))
+             or str(pathlib.Path(jar()).parent / "rules"))
     # Java .properties treat backslash as an escape character; a Windows path
     # written raw loses its separators ("D:\a\b" -> "D:ab").
     def posix(p: str) -> str:
@@ -88,7 +90,7 @@ def prepare_workspace(workdir: str, target: str, libraries: str = "",
 
 
 def build_command(heap: str = "8g") -> str:
-    return f'java -Xmx{heap} -jar "{JAR}"'
+    return f'java -Xmx{heap} -jar "{jar()}"'
 
 
 def submit_build(workdir: str, heap: str = "8g") -> dict:

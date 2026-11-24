@@ -27,7 +27,8 @@ def _default_binary() -> str:
     return "opengrep"
 
 
-BINARY = os.environ.get("OPENGREP_BIN") or _default_binary()
+def binary() -> str:
+    return os.environ.get("OPENGREP_BIN") or _default_binary()
 TEMPLATES = pathlib.Path(__file__).resolve().parents[1] / "templates" / "opengrep"
 
 _caps: dict | None = None
@@ -41,7 +42,7 @@ def capabilities(force: bool = False) -> dict:
         return _caps
     try:
         help_txt = subprocess.run(
-            [BINARY, "scan", "--help"],
+            [binary(), "scan", "--help"],
             capture_output=True, text=True, timeout=60,
             encoding="utf-8", errors="replace",
         ).stdout or ""
@@ -65,7 +66,7 @@ def build_args(src: str, out_json: str, rules: str | None = None,
     if not caps.get("available"):
         raise RuntimeError(f"opengrep 不可用: {caps.get('error')}")
 
-    argv = [BINARY, "scan", "-c", rules or str(TEMPLATES), "--json", "-o", out_json]
+    argv = [binary(), "scan", "-c", rules or str(TEMPLATES), "--json", "-o", out_json]
     for extra in extra_rules or []:
         argv += ["-c", extra]
     unsupported: list[str] = []

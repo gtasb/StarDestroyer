@@ -10,18 +10,19 @@ import os
 from . import net
 
 API = "https://api.tavily.com/search"
-KEY = os.environ.get("TAVILY_API_KEY", "")
+def key() -> str:
+    return os.environ.get("TAVILY_API_KEY", "")
 
 
 def available() -> bool:
-    return bool(KEY)
+    return bool(key())
 
 
 def search(query: str, max_results: int = 5, depth: str = "basic") -> dict:
-    if not KEY:
+    if not key():
         return {"ok": False, "error": "TAVILY_API_KEY 未设置",
                 "hint": "也可由宿主挂载 Tavily MCP 提供同名能力"}
-    payload = {"api_key": KEY, "query": query, "max_results": max_results,
+    payload = {"api_key": key(), "query": query, "max_results": max_results,
                "search_depth": depth, "include_answer": False}
     try:
         doc = net.post_json(API, payload)
