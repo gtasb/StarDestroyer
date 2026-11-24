@@ -206,60 +206,6 @@ def triage(components: dict, app_root: str | None = None, cvss_min: float = DEFA
     }
 
 
-def ai_annotate(triaged: dict, max_rows: int = 5) -> dict:
-    """Model pass over what the gate kept.
-
-    It may demote (keep -> ignore) with a stated reason. It may never promote:
-    a model cannot invent impact that the deterministic gate did not see.
-    """
-    from . import llm
-
-    if not llm.available():
-        return {"ok": False, "error": "DEEPSEEK_API_KEY 未设置"}
-    kept = triaged.get("kept", [])
-    judged = 0
-    for row in kept[:max_rows]:
-        prompt = (
-            "判断这个依赖漏洞在该应用中是否可能造成有效危害。只输出一个 JSON 对象："
-            '{"verdict":"keep|ignore","reason":"<=60字"}\n'
-            "ignore 的条件：仅影响未使用的功能、需要不可达的前置条件、或描述与所装版本功能无关。\n"
-            "cpe_matched=true 表示 NVD 的 CPE 版本区间已确认该安装版本受影响；"
-            "摘要里提到其它产品不构成 ignore 理由，那只是描述文本质量差。\n"
-            "source_scanned=0 表示没有源码可判断可达性，此时不得以「未使用」为由 ignore。\n"
-            "证据不足时输出 keep。"
-        )
-        ev = {"dependency": row["dependency"], "version": row["version"],
-              "cve": row["cve"], "cvss": row["cvss"], "epss": row["epss"],
-              "cwes": row["cwes"], "summary": row["summary"],
-              "cpe_matched": row.get("cpe_matched"),
-              "cpe_ranges": [c.get("criteria") + " " + str(c.get("end") or "") for c in row.get("cpes", [])][:3],
-              "source_scanned": row.get("source_scanned"),
-              "code_uses_package": row.get("used"),
-              "usage_evidence": row.get("usage_evidence", [])}
-        r = llm.chat(prompt, json.dumps(ev, ensure_ascii=False))
-        judged += 1
-        if not r.get("ok"):
-            continue
-        text = r["text"]
-        start, end = text.find("{"), text.rfind("}")
-        if start < 0 or end <= start:
-            continue
-        try:
-            obj = json.loads(text[start:end + 1])
-        except json.JSONDecodeError:
-            continue
-        row["ai_verdict"] = obj.get("verdict")
-        row["ai_reason"] = obj.get("reason", "")[:200]
-        if obj.get("verdict") == "ignore" and row in kept:
-            kept.remove(row)
-            row["reason"] = "模型复核降级：" + row["ai_reason"]
-            triaged.setdefault("ignored", []).append(row)
-    triaged.setdefault("stats", {})["kept"] = len(kept)
-    triaged["stats"]["ignored"] = len(triaged.get("ignored", []))
-    triaged["ai_judged"] = judged
-    return {"ok": True, "judged": judged}
-
-
 def sink_report(triaged: dict, app_root: str) -> dict:
     """For what survived: which sinks it implies and where the app calls them."""
     families: dict[str, dict] = {}
@@ -276,3 +222,108 @@ def sink_report(triaged: dict, app_root: str) -> dict:
         slot["verdict"] = "有调用点，需逐点复核" if slot["hints"] else "未见调用点"
     return {"families": list(families.values()),
             "unmapped": [r["cve"] for r in triaged.get("kept", []) if not r.get("family")]}
+
+
+VERDICT_FILE = pathlib.Path(__file__).resolve().parents[1] / ".work" / "sca-verdicts"
+
+
+def candidates(triaged: dict, app_root: str, limit: int = 20) -> dict:
+    """What an agent still has to decide, with the checks to run first.
+
+    No model is called here. The gate is deterministic; the remaining question --
+    "is the vulnerable API actually reachable in *this* code" -- needs a reader
+    with tools, so it is handed over as a task with concrete steps.
+    """
+    out = []
+    for row in triaged.get("kept", [])[:limit]:
+        tokens = [row["dependency"].replace("-", ".")]
+        out.append({
+            "cve": row["cve"], "dependency": row["dependency"], "version": row["version"],
+            "cvss": row["cvss"], "epss": row["epss"], "percentile": row["percentile"],
+            "cwes": row["cwes"], "family": row["family"], "sinks": row["sinks"],
+            "why_kept": row["reason"],
+            "hint_files": row.get("usage_evidence", []),
+            "verify": {
+                "goal": "确认该依赖的易受影响 API 在本应用中是否可达",
+                "steps": [
+                    f"grep -rn '<package>' {app_root}  # 先定位引用",
+                    "read 命中文件，确认是否真正调用 sinks 中的 API",
+                    "可达 -> keep，并给出 file:line；不可达 -> ignore，并给出证据",
+                ],
+                "package_tokens": tokens,
+                "sinks": row["sinks"],
+            },
+        })
+    return {"ok": True, "app_root": app_root, "count": len(out),
+            "candidates": out,
+            "instruction": "逐条用 read/grep 核实后再调用 sca_record_verdicts；"
+                           "ignore 必须带证据（file:line），无证据一律 keep。"}
+
+
+def record_verdicts(app_root: str, verdicts: list[dict]) -> dict:
+    """Persist an agent's keep/ignore decisions. Rejects unevidenced ignores."""
+    root = pathlib.Path(app_root).resolve()
+    accepted, rejected = [], []
+    for v in verdicts or []:
+        cve, verdict = v.get("cve"), v.get("verdict")
+        if not cve or verdict not in ("keep", "ignore"):
+            rejected.append({"cve": cve, "why": "verdict must be keep|ignore"})
+            continue
+        # absence of usage cannot cite a file:line, so a grep result counts too
+        evidence = [e for e in (v.get("evidence") or [])
+                    if e.get("file") or e.get("check")]
+        if verdict == "ignore" and not evidence:
+            rejected.append({"cve": cve, "why": "ignore 需要证据：file:line 或一次 grep 结果"})
+            continue
+        accepted.append({"cve": cve, "verdict": verdict,
+                         "reason": (v.get("reason") or "")[:300],
+                         "evidence": evidence[:5]})
+    if not accepted:
+        return {"ok": False, "recorded": 0, "rejected": rejected}
+
+    VERDICT_FILE.mkdir(parents=True, exist_ok=True)
+    key = VERDICT_FILE / (__import__("hashlib").sha256(str(root).encode()).hexdigest()[:16] + ".json")
+    store = {}
+    if key.exists():
+        try:
+            store = json.loads(key.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            store = {}
+    for row in accepted:
+        store[row["cve"]] = row
+    key.write_text(json.dumps(store, ensure_ascii=False, indent=2), encoding="utf-8")
+    return {"ok": True, "recorded": len(accepted), "rejected": rejected,
+            "file": str(key), "verdicts": store}
+
+
+def load_verdicts(app_root: str) -> dict:
+    root = pathlib.Path(app_root).resolve()
+    key = VERDICT_FILE / (__import__("hashlib").sha256(str(root).encode()).hexdigest()[:16] + ".json")
+    if not key.exists():
+        return {}
+    try:
+        return json.loads(key.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
+
+
+def apply_verdicts(triaged: dict, verdicts: dict) -> dict:
+    """Fold recorded decisions back into the gate result."""
+    kept, ignored = [], list(triaged.get("ignored", []))
+    for row in triaged.get("kept", []):
+        v = verdicts.get(row["cve"])
+        if not v:
+            row["decision"] = "pending"
+            kept.append(row)
+        elif v["verdict"] == "ignore":
+            row["reason"] = "复核否决：" + v.get("reason", "")
+            row["evidence"] = v.get("evidence", [])
+            ignored.append(row)
+        else:
+            row["decision"] = "kept"
+            row["reason"] = v.get("reason") or row["reason"]
+            row["evidence"] = v.get("evidence", [])
+            kept.append(row)
+    triaged["kept"], triaged["ignored"] = kept, ignored
+    triaged.setdefault("stats", {}).update({"kept": len(kept), "ignored": len(ignored)})
+    return triaged

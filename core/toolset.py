@@ -123,24 +123,30 @@ def n_day_context(cve_id: str, product: str = "") -> dict:
 
 
 def sca_triage_scan(path: str, cvss_min: float = 7.0, epss_pct_min: float = 0.95,
-                    use_ai: bool = False, max_lookups: int = 12) -> dict:
-    """Drop dependency CVEs that cannot hurt, then map survivors to sinks.
+                    max_lookups: int = 12) -> dict:
+    """Deterministic gate over dependency CVEs, plus the questions an agent must answer.
 
-    Gate: CVSS >= cvss_min OR EPSS percentile >= epss_pct_min, plus whether the
-    code references the package. use_ai adds a model pass that may demote, never
-    promote.
+    The gate keeps a CVE when CVSS >= cvss_min OR EPSS percentile >= epss_pct_min,
+    and never drops one for "unused" when there was no source to check. What is
+    left is handed over as `candidates` with explicit read/grep steps: deciding
+    reachability needs a reader with tools, not a blind model call.
     """
     comps = sca.enrich(path, max_lookups=max_lookups)
     t = sca_triage.triage(comps, app_root=path, cvss_min=cvss_min,
                           epss_pct_min=epss_pct_min)
     if not t.get("ok"):
         return t
-    if use_ai:
-        t["ai"] = sca_triage.ai_annotate(t)
+    t = sca_triage.apply_verdicts(t, sca_triage.load_verdicts(path))
     t["sinks"] = sca_triage.sink_report(t, path)
+    t["candidates"] = sca_triage.candidates(t, path)
     t["sca"] = {"source": comps.get("source"), "lookups": comps.get("lookups"),
                 "skipped": comps.get("skipped")}
     return t
+
+
+def sca_record_verdicts(path: str, verdicts: list[dict]) -> dict:
+    """Persist an agent's keep/ignore decisions; ignore requires file:line evidence."""
+    return sca_triage.record_verdicts(path, verdicts)
 
 
 def asset_graph_build(path: str, lookup_cves: bool = True, with_scan: bool = True) -> dict:
@@ -181,7 +187,8 @@ TOOLS = [
     ("propose_rules", propose_rules, "Rules generated from project dependencies."),
     ("list_generated_rules", list_generated_rules, "Generated rules and their manifest."),
     ("sca_scan", sca_scan, "Dependency tree mapped to NVD CVEs by version range."),
-    ("sca_triage", sca_triage_scan, "Filter dependency CVEs by CVSS/EPSS, then map to sinks."),
+    ("sca_triage", sca_triage_scan, "CVSS/EPSS gate + sink mapping + open questions for the agent."),
+    ("sca_record_verdicts", sca_record_verdicts, "Record keep/ignore decisions from source review."),
     ("nvd_lookup", nvd_lookup, "CVEs for a product/version."),
     ("web_search", web_search, "Tavily search with citable URLs."),
     ("n_day_context", n_day_context, "How an N-day is reached: gadget, sink, path."),

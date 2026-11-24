@@ -22,7 +22,8 @@ description: 对 Java/Python/Go 源码做污点审计；Java 编译产物走调�
 | `kb_search(query, k)` | 检索知识库片段，带出处 |
 | `rag_preview(query, k)` | 检索预览：命中片段与总字符数，显式不注入 |
 | `sca_scan(path)` | 依赖树（含传递依赖）→ 版本命中的 CVE |
-| `sca_triage(path, cvss_min, epss_pct_min, use_ai)` | 按 CVSS/EPSS 与代码引用筛掉无效风险，再把幸存依赖映射到 sink |
+| `sca_triage(path, cvss_min, epss_pct_min)` | 确定性闸 + 把幸存项作为 `candidates` 交给 agent 核实 |
+| `sca_record_verdicts(path, verdicts)` | 记录 agent 读码后的 keep/ignore，ignore 需证据 |
 | `nvd_lookup(product, version)` | 单个产品的 NVD 查询 |
 | `web_search(query)` | Tavily 检索，结果带 URL |
 | `n_day_context(cve)` | 查这个 N-day 怎么被触达：gadget / sink / 路径 |
@@ -92,8 +93,10 @@ OBSERVED(5) > CONFIRMED(4) > DERIVED(3) > INFERRED(2) > REJECTED(1)
 1. **分数闸**（确定性）：CVSS ≥ 7.0 或 EPSS 百分位 ≥ 0.95 才保留。
 2. **引用闸**（确定性）：源码里没有任何 import 引用该包 → 丢弃；
    但 `source_scanned=0`（没有源码可看）时不得以「未使用」为由丢弃。
-3. **模型闸**（可选）：对幸存项复核，只能把 keep 降为 ignore，不能反向；
-   证据里带 `cpe_matched`，摘要文本里出现别的产品名不构成否定理由。
+3. **复核闸（harness agent，不是盲判）**：`sca_triage` 只产出 `candidates`，
+   每条附带 `verify.steps`（grep 包名 → read 命中文件 → 对照 sinks 判断可达）。
+   agent 用自己的 grep/read 工具读源码后，用 `sca_record_verdicts` 记录结论；
+   ignore 必须带证据（file:line，或一次 grep 结果）。不把证据塞给模型让它凭摘要判断。
 
 幸存依赖按 CWE 映射到 sink 清单，再在源码里定位调用点（提示，不是证明）。
 

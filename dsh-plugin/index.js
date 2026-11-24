@@ -98,20 +98,36 @@ export function apply(ctx) {
   ctx.tools.register(tool({
     name: 'sd_sca_triage',
     description:
-      'Filter dependency CVEs that cannot cause effective harm (CVSS/EPSS gate plus '
-      + 'whether the code references the package), then map survivors to concrete sinks. '
-      + 'use_ai adds a model pass that may only demote, never promote.',
+      'Deterministic dependency-CVE gate (CVSS >= 7 or EPSS percentile >= 95, and never '
+      + 'dropped as "unused" when there is no source to check). Returns the survivors plus '
+      + '`candidates`: each one is a question you must answer by reading the code. '
+      + 'Use your grep/read tools on the listed package and sinks, then call sd_sca_verdict.',
     parameters: {
       path: { type: 'string', required: true, description: 'Project root' },
       cvss_min: { type: 'number', description: 'CVSS floor, default 7.0' },
       epss_pct_min: { type: 'number', description: 'EPSS percentile floor, default 0.95' },
-      use_ai: { type: 'boolean', description: 'Run the model pass (needs DEEPSEEK_API_KEY)' },
     },
     execute: (args, exec) => call('sca_triage', {
       path: args.path,
       cvss_min: args.cvss_min ?? 7.0,
       epss_pct_min: args.epss_pct_min ?? 0.95,
-      use_ai: args.use_ai ?? false,
+    }, exec.signal),
+  }))
+
+  ctx.tools.register(tool({
+    name: 'sd_sca_verdict',
+    description:
+      'Record keep/ignore decisions made after reading the source. ignore requires '
+      + 'evidence: a file:line you read, or a grep result showing no usage.',
+    parameters: {
+      path: { type: 'string', required: true, description: 'Project root' },
+      verdicts: {
+        type: 'array',
+        description: 'Each: {cve, verdict:"keep"|"ignore", reason, evidence:[{file,line}|{check,result}]}',
+      },
+    },
+    execute: (args, exec) => call('sca_record_verdicts', {
+      path: args.path, verdicts: args.verdicts ?? [],
     }, exec.signal),
   }))
 
