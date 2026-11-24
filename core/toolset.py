@@ -9,6 +9,7 @@ import json
 import pathlib
 
 from . import asset_graph, intel, jobs, kb, nvd, pipeline, pools, profile, rulegen, sca
+from . import sca_triage
 
 
 def _prepare_rules(src: str) -> dict:
@@ -121,6 +122,27 @@ def n_day_context(cve_id: str, product: str = "") -> dict:
     return intel.n_day_context(cve_id, product)
 
 
+def sca_triage_scan(path: str, cvss_min: float = 7.0, epss_pct_min: float = 0.95,
+                    use_ai: bool = False, max_lookups: int = 12) -> dict:
+    """Drop dependency CVEs that cannot hurt, then map survivors to sinks.
+
+    Gate: CVSS >= cvss_min OR EPSS percentile >= epss_pct_min, plus whether the
+    code references the package. use_ai adds a model pass that may demote, never
+    promote.
+    """
+    comps = sca.enrich(path, max_lookups=max_lookups)
+    t = sca_triage.triage(comps, app_root=path, cvss_min=cvss_min,
+                          epss_pct_min=epss_pct_min)
+    if not t.get("ok"):
+        return t
+    if use_ai:
+        t["ai"] = sca_triage.ai_annotate(t)
+    t["sinks"] = sca_triage.sink_report(t, path)
+    t["sca"] = {"source": comps.get("source"), "lookups": comps.get("lookups"),
+                "skipped": comps.get("skipped")}
+    return t
+
+
 def asset_graph_build(path: str, lookup_cves: bool = True, with_scan: bool = True) -> dict:
     """Build the asset graph. with_scan folds the audit findings into it."""
     findings = None
@@ -159,6 +181,7 @@ TOOLS = [
     ("propose_rules", propose_rules, "Rules generated from project dependencies."),
     ("list_generated_rules", list_generated_rules, "Generated rules and their manifest."),
     ("sca_scan", sca_scan, "Dependency tree mapped to NVD CVEs by version range."),
+    ("sca_triage", sca_triage_scan, "Filter dependency CVEs by CVSS/EPSS, then map to sinks."),
     ("nvd_lookup", nvd_lookup, "CVEs for a product/version."),
     ("web_search", web_search, "Tavily search with citable URLs."),
     ("n_day_context", n_day_context, "How an N-day is reached: gadget, sink, path."),

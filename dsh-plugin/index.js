@@ -96,6 +96,26 @@ export function apply(ctx) {
   }))
 
   ctx.tools.register(tool({
+    name: 'sd_sca_triage',
+    description:
+      'Filter dependency CVEs that cannot cause effective harm (CVSS/EPSS gate plus '
+      + 'whether the code references the package), then map survivors to concrete sinks. '
+      + 'use_ai adds a model pass that may only demote, never promote.',
+    parameters: {
+      path: { type: 'string', required: true, description: 'Project root' },
+      cvss_min: { type: 'number', description: 'CVSS floor, default 7.0' },
+      epss_pct_min: { type: 'number', description: 'EPSS percentile floor, default 0.95' },
+      use_ai: { type: 'boolean', description: 'Run the model pass (needs DEEPSEEK_API_KEY)' },
+    },
+    execute: (args, exec) => call('sca_triage', {
+      path: args.path,
+      cvss_min: args.cvss_min ?? 7.0,
+      epss_pct_min: args.epss_pct_min ?? 0.95,
+      use_ai: args.use_ai ?? false,
+    }, exec.signal),
+  }))
+
+  ctx.tools.register(tool({
     name: 'sd_graph',
     description:
       'Build the asset graph: app -> technology/version -> dependency -> N-day, '

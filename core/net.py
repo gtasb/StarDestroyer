@@ -8,6 +8,7 @@ choice stops every later call from paying for the failed handshake again.
 import json
 import ssl
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -34,7 +35,10 @@ def request_json(url: str, data: bytes | None = None, headers: dict | None = Non
         except ssl.SSLError as exc:
             _TLS12_ONLY.add(host)   # retry immediately; no backoff needed
             last = exc
-        except Exception as exc:
+        except urllib.error.URLError as exc:
+            # urllib wraps TLS failures in URLError; the raw SSLError is in .reason
+            if isinstance(getattr(exc, "reason", None), ssl.SSLError):
+                _TLS12_ONLY.add(host)
             last = exc
             time.sleep(1 + i)
     raise last  # type: ignore[misc]

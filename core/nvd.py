@@ -142,7 +142,7 @@ def _product_of(criteria: str) -> str:
 
 def lookup(keyword: str, version: str | None = None, limit: int = 20) -> dict:
     """CVEs for a product; with a version, only those whose CPE range covers it."""
-    cache_key = f"v2:{keyword}@{version or '*'}"
+    cache_key = f"v3:{keyword}@{version or '*'}"
     cp = _cache_path(cache_key)
     if cp.exists():
         try:
@@ -182,10 +182,16 @@ def lookup(keyword: str, version: str | None = None, limit: int = 20) -> dict:
             continue
         desc = next((d["value"] for d in cve.get("descriptions", [])
                      if d.get("lang") == "en"), "")
+        cwes = sorted({
+            d.get("value") for w in cve.get("weaknesses", [])
+            for d in w.get("description", [])
+            if (d.get("value") or "").startswith("CWE-")
+        })
         out.append({
             "id": cve.get("id"),
             "summary": desc[:600],
             "score": _score(cve),
+            "cwes": cwes,
             "published": (cve.get("published") or "")[:10],
             "matched_version": matched,
             "cpes": cpes[:5],
