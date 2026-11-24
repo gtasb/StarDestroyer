@@ -18,3 +18,4 @@ demo/**/classes/
 # OS
 Thumbs.db
 .DS_Store
+opensca.log

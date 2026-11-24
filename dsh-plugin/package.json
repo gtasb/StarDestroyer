@@ -4,7 +4,11 @@
   "description": "Source audit for DeepSeek Harness: taint scanning, gadget-chain recall, SCA/N-day mapping, asset graph, knowledge base.",
   "type": "module",
   "main": "index.js",
-  "files": ["index.js", "cordis.patch.yml", "README.md"],
+  "files": [
+    "index.js",
+    "cordis.patch.yml",
+    "README.md"
+  ],
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
@@ -17,5 +21,8 @@
   "devDependencies": {
     "@deepseek-ai/cordis": "^4.1.0",
     "@deepseek-ai/dsh-tools": "^0.0.1-rc.1"
+  },
+  "engines": {
+    "dsh": ">=0.2.2-rc.5 <0.3.0"
   }
 }

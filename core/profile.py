@@ -66,7 +66,12 @@ def profile(root: str) -> dict:
                 build_files.append(cand)
 
     for f in p.rglob("*"):
-        if not f.is_file() or "/.work/" in f.as_posix():
+        if not f.is_file():
+            continue
+        # Skip this project's own runtime dirs, not any path that happens to
+        # contain ".work" -- a scanned project may legitimately live there.
+        rel = f.relative_to(p)
+        if rel.parts and rel.parts[0] in (".work", ".git", "node_modules", "target"):
             continue
         lang = _EXT.get(f.suffix.lower())
         if lang:

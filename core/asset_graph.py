@@ -277,6 +277,8 @@ def build(project_root: str, findings: list[dict] | None = None,
         },
         "sca_source": comps.get("source"),
         "sca_error": comps.get("opensca_error"),
+        "nvd_lookups": comps.get("lookups"),
+        "nvd_skipped": comps.get("skipped"),
     }
 
 

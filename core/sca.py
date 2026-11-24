@@ -116,19 +116,33 @@ def components(root: str) -> dict:
 
 
 def enrich(root: str, max_lookups: int = 12) -> dict:
-    """Attach NVD CVEs to components that carry a version."""
+    """Attach NVD CVEs to components that carry a version.
+
+    The lookup cap is reported, not silent: an unchecked dependency must never
+    read as "no known CVEs".
+    """
     comps = components(root)
     if not comps.get("ok"):
         return comps
-    seen, lookups = set(), 0
+    seen, lookups, skipped = set(), 0, 0
     for c in comps["components"]:
         key = (c["name"].lower(), c["version"])
-        if not c["version"] or key in seen or lookups >= max_lookups:
+        if not c["version"]:
             c["cves"] = []
+            continue
+        if key in seen:
+            c["cves"] = []
+            continue
+        if lookups >= max_lookups:
+            c["cves"] = []
+            c["skipped"] = "lookup cap"
+            skipped += 1
             continue
         seen.add(key)
         lookups += 1
         r = nvd.lookup(c["name"], c["version"])
         c["cves"] = r.get("affected", []) if r.get("ok") else []
         c["nvd_error"] = r.get("error")
+    comps["lookups"] = lookups
+    comps["skipped"] = skipped
     return comps
