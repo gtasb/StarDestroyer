@@ -149,19 +149,19 @@ def load_graph(output_dir: str, db_path: str) -> dict:
     })
     graph.ensure_rel_table(conn, "CALL", "Method", "Method", {"line": "INT64"})
 
-    methods = [{
+    methods = ({
         "id": r["ID"], "name": r.get("NAME", ""), "cls": r.get("CLASSNAME", ""),
         "sig": r.get("SIGNATURE", ""), "vul": r.get("VUL", "") or "",
         "is_sink": r.get("IS_SINK", ""), "serial": r.get("IS_SERIALIZABLE", ""),
-    } for r in _iter_rows(output_dir, "METHODS")]
-    classes = [{
+    } for r in _iter_rows(output_dir, "METHODS"))
+    classes = ({
         "id": r["ID"], "name": r.get("NAME", ""),
         "serial": r.get("IS_SERIALIZABLE", ""), "super": r.get("SUPER_CLASS", ""),
-    } for r in _iter_rows(output_dir, "CLASSES")]
-    calls = [{
+    } for r in _iter_rows(output_dir, "CLASSES"))
+    calls = ({
         "src": r["SOURCE"], "dst": r["TARGET"],
         "line": int(r["LINE_NUM"]) if r.get("LINE_NUM", "").isdigit() else 0,
-    } for r in _iter_rows(output_dir, "CALL") if r["SOURCE"] != r["TARGET"]]
+    } for r in _iter_rows(output_dir, "CALL") if r["SOURCE"] != r["TARGET"])
 
     from .. import logging
     def _drain(rows, label, props, rel=False, edges_props=None):
