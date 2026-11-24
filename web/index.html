@@ -753,6 +753,8 @@ $("#log-refresh").onclick = loadLogs;
 $("#log-level").onchange = loadLogs;
 
 setMode("src"); health(); loadProjects(); loadArtifacts();
+const initialView = new URLSearchParams(location.search).get("view");
+if (initialView) showView(initialView);
 setInterval(health, 20000);
 </script>
 </body>
