@@ -11,6 +11,7 @@ Java / Python / Go 源码，Java 编译产物走调用图召回。
 | Tabby 召回层 | Java 字节码建调用图，找无 source 的 gadget 链（`readObject → … → Runtime.exec`） |
 | 规则自生成 | 读项目依赖 → 生成框架专属规则 → 引擎校验通过才启用 |
 | SCA / N-day | OpenSCA 解依赖树 → NVD 按 CPE 版本区间判定是否真受影响 |
+| SCA 筛选 | CVSS/EPSS 确定性闸 → 候选交给 harness agent 用 grep/read 核实可达性 |
 | 知识库 | 文档按需检索，带出处返回，**不注入提示词** |
 | 资产图谱 | 应用 / 技术 / 版本 / 依赖 / N-day / 端点 / 功能 / 漏洞类别，节点带事实等级 |
 | 复核 | 发现者不给自己判卷：独立复核调用只能降级或沿用，不能升级 |
@@ -52,7 +53,7 @@ python web/run.py          # http://127.0.0.1:8770
 | `TAVILY_API_KEY` | N-day 触达方式检索 |
 | `NVD_API_KEY` | 提高 NVD 限流额度 |
 
-MCP 接入：`python adapters/mcp_server.py`（stdio），共 18 个工具。
+MCP 接入：`python adapters/mcp_server.py`（stdio），共 20 个工具。
 
 命令行（JSON 入口，宿主集成用）：
 
