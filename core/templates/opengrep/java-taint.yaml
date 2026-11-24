@@ -1,0 +1,114 @@
+rules:
+  - id: java-sqli-jdbc-statement
+    mode: taint
+    languages: [java]
+    severity: ERROR
+    options:
+      interfile: true
+    message: 外部输入流入 JDBC Statement 执行
+    metadata:
+      cwe: CWE-89
+    pattern-sources:
+      - patterns:
+          - pattern-either:
+              - pattern: (HttpServletRequest $R).getParameter(...)
+              - pattern: (HttpServletRequest $R).getHeader(...)
+              - pattern: $REQ.getParameter(...)
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: (Statement $S).executeQuery($Q)
+              - pattern: (Statement $S).execute($Q)
+              - pattern: (Statement $S).executeUpdate($Q)
+              - pattern: $S.executeQuery($Q)
+              - pattern: $S.execute($Q)
+              - pattern: $S.executeUpdate($Q)
+          - focus-metavariable: $Q
+    pattern-sanitizers:
+      - pattern: $X.prepareStatement(...)
+
+  - id: java-cmd-injection-runtime-exec
+    mode: taint
+    languages: [java]
+    severity: ERROR
+    options:
+      interfile: true
+    message: 外部输入流入 Runtime/ProcessBuilder 命令执行
+    metadata:
+      cwe: CWE-78
+    pattern-sources:
+      - patterns:
+          - pattern-either:
+              - pattern: (HttpServletRequest $R).getParameter(...)
+              - pattern: $REQ.getParameter(...)
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: (Runtime $RT).exec($C)
+              - pattern: Runtime.getRuntime().exec($C)
+              - pattern: $RT.exec($C)
+              - pattern: (ProcessBuilder $PB).command($C)
+          - focus-metavariable: $C
+
+  - id: java-spel-injection
+    mode: taint
+    languages: [java]
+    severity: ERROR
+    options:
+      interfile: true
+    message: 外部输入流入 SpEL 表达式解析
+    metadata:
+      cwe: CWE-917
+    pattern-sources:
+      - patterns:
+          - pattern-either:
+              - pattern: (HttpServletRequest $R).getParameter(...)
+              - pattern: $REQ.getParameter(...)
+              - pattern: (String $E).substring(...)
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: (SpelExpressionParser $P).parseExpression($E)
+              - pattern: (ExpressionParser $P).parseExpression($E)
+          - focus-metavariable: $E
+
+  - id: java-ssrf-url-open
+    mode: taint
+    languages: [java]
+    severity: ERROR
+    options:
+      interfile: true
+    message: 外部输入流入 URL 连接（SSRF）
+    metadata:
+      cwe: CWE-918
+    pattern-sources:
+      - patterns:
+          - pattern-either:
+              - pattern: (HttpServletRequest $R).getParameter(...)
+              - pattern: $REQ.getParameter(...)
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: (URL $U).openConnection(...)
+              - pattern: (URL $U).openStream(...)
+          - focus-metavariable: $U
+
+  - id: java-deser-objectinputstream
+    mode: taint
+    languages: [java]
+    severity: ERROR
+    options:
+      interfile: true
+    message: 外部输入流入 ObjectInputStream.readObject
+    metadata:
+      cwe: CWE-502
+    pattern-sources:
+      - patterns:
+          - pattern-either:
+              - pattern: (HttpServletRequest $R).getInputStream()
+              - pattern: (HttpServletRequest $R).getParameter(...)
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: (ObjectInputStream $O).readObject()
+              - pattern: (ObjectInputStream $O).readUnshared()

@@ -1,0 +1,66 @@
+rules:
+  - id: go-sqli-query
+    mode: taint
+    languages: [go]
+    severity: ERROR
+    options:
+      interfile: true
+    message: 外部输入流入 SQL 查询
+    metadata:
+      cwe: CWE-89
+    pattern-sources:
+      - patterns:
+          - pattern-either:
+              - pattern: $R.URL.Query().Get(...)
+              - pattern: $R.FormValue(...)
+              - pattern: $R.PostFormValue(...)
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: $DB.Query($Q, ...)
+              - pattern: $DB.QueryRow($Q, ...)
+              - pattern: $DB.Exec($Q, ...)
+          - focus-metavariable: $Q
+
+  - id: go-command-injection
+    mode: taint
+    languages: [go]
+    severity: ERROR
+    options:
+      interfile: true
+    message: 外部输入流入命令执行
+    metadata:
+      cwe: CWE-78
+    pattern-sources:
+      - patterns:
+          - pattern-either:
+              - pattern: $R.URL.Query().Get(...)
+              - pattern: $R.FormValue(...)
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: exec.Command(..., $C, ...)
+              - pattern: exec.CommandContext(..., $C, ...)
+          - focus-metavariable: $C
+
+  - id: go-ssrf-http
+    mode: taint
+    languages: [go]
+    severity: ERROR
+    options:
+      interfile: true
+    message: 外部输入流入 HTTP 请求（SSRF）
+    metadata:
+      cwe: CWE-918
+    pattern-sources:
+      - patterns:
+          - pattern-either:
+              - pattern: $R.URL.Query().Get(...)
+              - pattern: $R.FormValue(...)
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: http.Get($U)
+              - pattern: http.Post($U, ...)
+              - pattern: client.Get($U)
+          - focus-metavariable: $U

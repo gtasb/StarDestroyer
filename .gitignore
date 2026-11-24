@@ -1,0 +1,17 @@
+# runtime artifacts
+.work/
+__pycache__/
+*.pyc
+
+# build output
+demo/**/classes/
+*.class
+
+# local editors
+.idea/
+.vscode/
+*.iml
+
+# OS
+Thumbs.db
+.DS_Store

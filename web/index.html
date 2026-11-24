@@ -1,0 +1,612 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>StarDestroyer · 代码审计</title>
+<style>
+  :root{
+    --bg:#f7f8fa; --panel:#fff; --line:#e9ebef; --line2:#dfe3e8;
+    --text:#14171a; --muted:#6b7280; --muted2:#9aa1ab;
+    --green:#0f9d58; --green-bg:#e8f5ec;
+    --amber:#9a6700; --amber-bg:#fdf3e0;
+    --red:#c0392b; --red-bg:#fdecea;
+    --blue:#1a73e8; --blue-bg:#e8f0fe;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{background:var(--bg);color:var(--text);
+       font:14px/1.55 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+       -webkit-font-smoothing:antialiased}
+  .app{display:flex;min-height:100vh}
+
+  /* ---------- sidebar ---------- */
+  .sidebar{width:236px;flex:0 0 236px;background:#fbfbfc;border-right:1px solid var(--line);
+           display:flex;flex-direction:column;position:sticky;top:0;height:100vh}
+  .brand{display:flex;align-items:center;gap:10px;padding:18px 20px 14px;font-weight:650;font-size:15px}
+  .logo{width:26px;height:26px;border-radius:8px;background:#111827;color:#fff;
+        display:grid;place-items:center;font-size:13px}
+  nav{padding:8px 12px;flex:1;overflow:auto}
+  .nav-group{font-size:11px;color:var(--muted2);letter-spacing:.06em;padding:14px 10px 6px}
+  .nav-item{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;
+            color:#374151;cursor:pointer;font-size:13.5px}
+  .nav-item:hover{background:#f1f3f6}
+  .nav-item.active{background:#fff;border:1px solid var(--line);font-weight:600;color:var(--text)}
+  .nav-item .ic{width:16px;text-align:center;color:var(--muted)}
+  .sidebar-foot{display:flex;align-items:center;gap:8px;padding:12px 20px;
+                border-top:1px solid var(--line);font-size:12px;color:var(--muted)}
+  .ver{margin-left:auto;color:var(--muted2)}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--green);display:inline-block}
+  .dot.off{background:var(--muted2)}
+
+  /* ---------- topbar ---------- */
+  .main{flex:1;min-width:0;display:flex;flex-direction:column}
+  .topbar{height:58px;flex:0 0 58px;background:#fff;border-bottom:1px solid var(--line);
+          display:flex;align-items:center;gap:18px;padding:0 28px;position:sticky;top:0;z-index:5}
+  .proj{display:flex;align-items:center;gap:8px;padding:6px 12px;border:1px solid var(--line2);
+        border-radius:8px;font-size:13px}
+  .tabs{display:flex;gap:4px}
+  .tab{padding:6px 10px;border-radius:7px;font-size:13px;color:var(--muted);cursor:default}
+  .tab.active{color:var(--text);background:#f1f3f6;font-weight:600}
+  .top-right{margin-left:auto;display:flex;align-items:center;gap:8px}
+
+  /* ---------- content ---------- */
+  .content{padding:26px 32px 56px;max-width:1460px;width:100%}
+  .page-head{display:flex;align-items:flex-start;justify-content:space-between;gap:24px;flex-wrap:wrap}
+  h1{font-size:28px;margin:0 0 6px;letter-spacing:-.01em}
+  .sub{color:var(--muted);margin:0;font-size:13.5px}
+  .run-box{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  input#target{height:38px;width:380px;border:1px solid var(--line2);border-radius:8px;
+               padding:0 12px;font:inherit;background:#fff}
+  input#target:focus{outline:none;border-color:#b9c0ca;box-shadow:0 0 0 3px #eef1f4}
+  .seg{display:flex;border:1px solid var(--line2);border-radius:8px;overflow:hidden;background:#fff}
+  .seg button{border:0;background:transparent;height:38px;padding:0 14px;cursor:pointer;
+              font:inherit;color:var(--muted)}
+  .seg button.on{background:#111827;color:#fff}
+  .btn{height:38px;padding:0 18px;border:0;border-radius:8px;background:#111827;color:#fff;
+       font:inherit;cursor:pointer}
+  .btn:disabled{background:#9aa1ab;cursor:default}
+  .opts{display:flex;gap:14px;align-items:center;font-size:12.5px;color:var(--muted);
+        margin-top:10px;justify-content:flex-end;width:100%}
+  .opts label{display:flex;align-items:center;gap:6px;cursor:pointer}
+
+  /* ---------- kpis ---------- */
+  .kpis{margin-top:22px;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));
+        background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  .kpi{padding:16px 20px;border-right:1px solid var(--line)}
+  .kpi:last-child{border-right:0}
+  .k-top{display:flex;justify-content:space-between;color:var(--muted);font-size:12.5px}
+  .k-value{font-size:30px;font-weight:650;margin-top:4px;letter-spacing:-.02em}
+  .k-sub{font-size:12px;color:var(--muted2);margin-top:2px}
+
+  /* ---------- grid ---------- */
+  .grid{display:grid;grid-template-columns:minmax(0,1fr) 356px;gap:18px;margin-top:18px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  .card-head{display:flex;align-items:center;justify-content:space-between;
+             padding:14px 18px;border-bottom:1px solid var(--line)}
+  .card-head h2{font-size:14.5px;margin:0;font-weight:620}
+  .link{color:var(--muted);font-size:12.5px;cursor:pointer;text-decoration:none}
+  .link:hover{color:var(--text)}
+  .side{display:flex;flex-direction:column;gap:18px}
+
+  /* ---------- findings ---------- */
+  .row{display:grid;grid-template-columns:92px minmax(0,1fr) 128px;gap:12px;
+       padding:14px 18px;border-bottom:1px solid var(--line);cursor:pointer;align-items:start}
+  .row:last-child{border-bottom:0}
+  .row:hover{background:#fafbfc}
+  .f-title{font-weight:600;font-size:13.5px;word-break:break-all}
+  .f-sub{color:var(--muted);font-size:12.5px;margin-top:2px;word-break:break-all}
+  .f-pf{color:var(--muted2);font-size:11.5px;text-align:right;font-family:ui-monospace,Consolas,monospace}
+  .chip{font-size:11.5px;padding:2px 9px;border-radius:999px;font-weight:600;white-space:nowrap}
+  .st-confirmed{background:var(--green-bg);color:var(--green)}
+  .st-needs_review{background:var(--amber-bg);color:var(--amber)}
+  .st-needs_dynamic{background:var(--red-bg);color:var(--red)}
+  .st-rejected{background:#f1f3f6;color:var(--muted)}
+  .trace{padding:0 18px 16px 34px;background:#fafbfc;border-bottom:1px solid var(--line)}
+  .trace ol{margin:0;padding-left:16px;color:#4b5563;font-size:12.5px}
+  .trace li{margin:3px 0;font-family:ui-monospace,Consolas,monospace}
+  .trace .kind{color:var(--muted2);margin-right:6px}
+
+  .empty{padding:44px 20px;text-align:center;color:var(--muted)}
+  .empty .e-ic{font-size:22px;opacity:.5}
+  .empty .e-t{margin-top:8px;font-weight:600;color:#374151}
+  .empty .e-h{margin-top:4px;font-size:12.5px;color:var(--muted2)}
+
+  /* ---------- side widgets ---------- */
+  .kv{display:flex;justify-content:space-between;padding:7px 18px;font-size:12.5px;color:#4b5563}
+  .kv:last-child{padding-bottom:14px}
+  .kv span:last-child{color:var(--text);font-weight:600;font-variant-numeric:tabular-nums}
+  .badge{font-size:11.5px;padding:2px 8px;border-radius:6px;background:var(--green-bg);color:var(--green);font-weight:600}
+  .badge.gray{background:#f1f3f6;color:var(--muted)}
+  .bar-row{display:grid;grid-template-columns:66px minmax(0,1fr) 30px;gap:10px;align-items:center;
+           padding:6px 18px;font-size:12.5px;color:#4b5563}
+  .bar-row:last-child{padding-bottom:14px}
+  .bar{height:6px;background:#eef1f4;border-radius:3px;overflow:hidden}
+  .bar>i{display:block;height:100%;border-radius:3px;transition:width .3s}
+  .bar-row .n{text-align:right;font-variant-numeric:tabular-nums;color:var(--text);font-weight:600}
+  .note{padding:0 18px 16px;color:var(--muted2);font-size:12px}
+  .err{padding:16px 18px;color:var(--red);font-size:13px}
+
+  @media(max-width:1120px){
+    .kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
+    .kpi:nth-child(2){border-right:0}
+    .kpi:nth-child(-n+2){border-bottom:1px solid var(--line)}
+    .grid{grid-template-columns:1fr}
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand"><span class="logo">◈</span>StarDestroyer</div>
+    <nav>
+      <div class="nav-group">工作台</div>
+      <div class="nav-item active"><span class="ic">◉</span>概览</div>
+      <div class="nav-item"><span class="ic">⌕</span>发现</div>
+      <div class="nav-group">引擎</div>
+      <div class="nav-item"><span class="ic">◐</span>Opengrep 精度层</div>
+      <div class="nav-item"><span class="ic">◑</span>Tabby 召回层</div>
+      <div class="nav-group">系统</div>
+      <div class="nav-item"><span class="ic">▤</span>任务</div>
+    </nav>
+    <div class="sidebar-foot"><span class="dot" id="dot-conn"></span><span id="conn">已连接</span><span class="ver">v0.1</span></div>
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <div class="proj"><span class="dot" id="dot-proj"></span>本地项目</div>
+      <div class="tabs"><span class="tab active" data-view="overview">概览</span><span class="tab" data-view="graph">图谱</span><span class="tab" data-view="kb">知识库</span></div>
+      <div class="top-right">
+        <span class="badge gray" id="pill-og">opengrep</span>
+        <span class="badge gray" id="pill-tb">tabby</span>
+        <span class="badge gray" id="pill-ds">deepseek</span>
+      </div>
+    </header>
+
+    <main class="content" id="view-overview">
+      <div class="page-head">
+        <div>
+          <h1>代码审计</h1>
+          <p class="sub">Opengrep 精度层 + Tabby 召回层，每条结论都带可复核的调用链</p>
+        </div>
+        <div class="run-box">
+          <input id="target" placeholder="源码目录，或编译后的 jar 路径">
+          <div class="seg">
+            <button id="m-src" class="on">源码</button>
+            <button id="m-jar">JAR</button>
+          </div>
+          <button id="go" class="btn">开始</button>
+          <div class="opts" id="opts">
+            <label><input type="checkbox" id="verify">二次复核</label>
+            <label><input type="checkbox" id="ai">DeepSeek 说明</label>
+          </div>
+        </div>
+      </div>
+
+      <div class="kpis">
+        <div class="kpi"><div class="k-top"><span>原始命中</span><span>引擎输出</span></div>
+          <div class="k-value" id="k-raw">—</div><div class="k-sub" id="k-raw-sub">尚未运行</div></div>
+        <div class="kpi"><div class="k-top"><span>可报告</span><span>过判定</span></div>
+          <div class="k-value" id="k-rep">—</div><div class="k-sub" id="k-rep-sub">—</div></div>
+        <div class="kpi"><div class="k-top"><span>待复核</span><span>需人工</span></div>
+          <div class="k-value" id="k-rev">—</div><div class="k-sub" id="k-rev-sub">—</div></div>
+        <div class="kpi"><div class="k-top"><span>图规模</span><span>覆盖</span></div>
+          <div class="k-value" id="k-graph">—</div><div class="k-sub" id="k-graph-sub">—</div></div>
+      </div>
+
+      <div class="grid">
+        <section class="card">
+          <div class="card-head"><h2>发现</h2><span class="link" id="artifact">—</span></div>
+          <div id="findings">
+            <div class="empty">
+              <div class="e-ic">◌</div>
+              <div class="e-t">还没有运行记录</div>
+              <div class="e-h">输入目标路径后点「开始」。源码走污点分析，JAR 走调用图召回。</div>
+            </div>
+          </div>
+        </section>
+
+        <div class="side">
+          <section class="card">
+            <div class="card-head"><h2>运行状态</h2><span class="badge" id="runstate">就绪</span></div>
+            <div id="pools"></div>
+          </section>
+          <section class="card">
+            <div class="card-head"><h2>判定分布</h2></div>
+            <div id="dist"><div class="note">运行一次后显示</div></div>
+          </section>
+          <section class="card">
+            <div class="card-head"><h2>覆盖台账</h2></div>
+            <div id="cov"><div class="note">覆盖单元 = 文件 × 攻击类</div></div>
+          </section>
+          <section class="card">
+            <div class="card-head"><h2>项目规则</h2><span class="badge gray" id="rule-count">0</span></div>
+            <div id="rules"><div class="note">扫描前按依赖自动生成，引擎校验通过才启用</div></div>
+          </section>
+        </div>
+      </div>
+    </main>
+
+    <main class="content" id="view-graph" hidden>
+      <div class="page-head">
+        <div>
+          <h1>资产图谱</h1>
+          <p class="sub">应用 → 技术/版本 → 依赖 → N-day，以及端点 → 功能；每条边都带来源</p>
+        </div>
+        <div class="run-box">
+          <input id="g-path" placeholder="项目根目录（含 pom.xml / go.mod）">
+          <button id="g-build" class="btn">建图</button>
+        </div>
+      </div>
+
+      <div class="kpis">
+        <div class="kpi"><div class="k-top"><span>技术</span><span>识别</span></div>
+          <div class="k-value" id="g-tech">—</div><div class="k-sub">来自构建文件与源码</div></div>
+        <div class="kpi"><div class="k-top"><span>依赖</span><span>SCA</span></div>
+          <div class="k-value" id="g-dep">—</div><div class="k-sub" id="g-dep-sub">含传递依赖</div></div>
+        <div class="kpi"><div class="k-top"><span>N-day</span><span>版本命中</span></div>
+          <div class="k-value" id="g-nday">—</div><div class="k-sub">NVD CPE 区间匹配</div></div>
+        <div class="kpi"><div class="k-top"><span>端点</span><span>源码提取</span></div>
+          <div class="k-value" id="g-ep">—</div><div class="k-sub" id="g-ep-sub">含功能推断</div></div>
+      </div>
+
+      <div class="grid">
+        <section class="card">
+          <div class="card-head"><h2>N-day</h2><span class="link" id="g-db">—</span></div>
+          <div id="g-ndays"><div class="empty"><div class="e-ic">◌</div>
+            <div class="e-t">尚未建图</div><div class="e-h">选项目根目录后点「建图」，会跑 SCA 与 NVD 查询</div></div></div>
+        </section>
+        <div class="side">
+          <section class="card">
+            <div class="card-head"><h2>端点</h2><span class="badge gray" id="g-ep-count">0</span></div>
+            <div id="g-endpoints"><div class="note">建图后显示</div></div>
+          </section>
+          <section class="card">
+            <div class="card-head"><h2>图谱统计</h2></div>
+            <div id="g-counts"><div class="note">—</div></div>
+          </section>
+          <section class="card">
+            <div class="card-head"><h2>漏洞类别</h2></div>
+            <div id="g-classes"><div class="note">建图后显示，按事实等级标注</div></div>
+          </section>
+        </div>
+      </div>
+    </main>
+
+    <main class="content" id="view-kb" hidden>
+      <div class="page-head">
+        <div>
+          <h1>知识库</h1>
+          <p class="sub">文档按需检索、带出处返回；不会自动拼进任何提示词</p>
+        </div>
+        <div class="run-box">
+          <input id="kb-path" placeholder="文档目录，例如 D:\\audit-docs">
+          <button id="kb-ingest" class="btn">入库</button>
+        </div>
+      </div>
+
+      <div class="grid" style="grid-template-columns:minmax(0,1fr) 356px">
+        <section class="card">
+          <div class="card-head"><h2>检索</h2><span class="link" id="kb-hits">—</span></div>
+          <div style="display:flex;gap:8px;padding:14px 18px;border-bottom:1px solid var(--line)">
+            <input id="kb-q" placeholder="关键词，例如 污点传播 / JdbcTemplate" style="flex:1;height:36px;border:1px solid var(--line2);border-radius:8px;padding:0 12px;font:inherit">
+            <button id="kb-search" class="btn" style="height:36px">检索</button>
+            <button id="kb-preview" class="btn" style="height:36px;background:#374151">预览</button>
+          </div>
+          <div id="kb-results"><div class="empty"><div class="e-ic">◌</div>
+            <div class="e-t">还没有检索</div><div class="e-h">输入关键词，取回最相关的片段与出处</div></div></div>
+        </section>
+        <div class="side">
+          <section class="card">
+            <div class="card-head"><h2>已入库</h2><span class="badge gray" id="kb-count">0</span></div>
+            <div id="kb-docs"><div class="note">尚未入库任何文档</div></div>
+          </section>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const LABEL = {confirmed:"已确认", needs_review:"待复核", needs_dynamic:"需动态", rejected:"已否证"};
+let mode = "src";
+
+$("#m-src").onclick = () => setMode("src");
+$("#m-jar").onclick = () => setMode("jar");
+function setMode(m){
+  mode = m;
+  $("#m-src").className = m === "src" ? "on" : "";
+  $("#m-jar").className = m === "jar" ? "on" : "";
+  $("#opts").style.visibility = m === "src" ? "visible" : "hidden";
+  $("#target").placeholder = m === "src" ? "源码目录，例如 D:\\proj\\src" : "编译后的 jar，例如 D:\\proj\\app.jar";
+}
+
+async function health(){
+  try {
+    const h = await (await fetch("/api/health")).json();
+    const og = h.opengrep || {};
+    setPill("#pill-og", og.available ? "opengrep" : "opengrep 缺失", og.available);
+    setPill("#pill-tb", h.tabby ? "tabby" : "tabby 缺失", !!h.tabby);
+    setPill("#pill-ds", h.deepseek ? "deepseek" : "deepseek 未配", h.deepseek);
+    $("#conn").textContent = "已连接";
+    $("#dot-conn").className = "dot";
+    const rows = Object.entries(h.pools || {}).map(([k,v]) =>
+      `<div class="kv"><span>${esc(k)}</span><span>${v.free}/${v.limit}</span></div>`).join("");
+    $("#pools").innerHTML = rows;
+  } catch (e) {
+    $("#conn").textContent = "未连接";
+    $("#dot-conn").className = "dot off";
+  }
+}
+function setPill(sel, text, ok){
+  const el = $(sel); el.textContent = text;
+  el.className = "badge" + (ok ? "" : " gray");
+}
+
+$("#go").onclick = async () => {
+  const p = $("#target").value.trim();
+  if (!p) { $("#target").focus(); return; }
+  const isJar = mode === "jar";
+  const body = isJar
+    ? { jar: p, mode: "gadget", heap: "4g", limit: 30 }
+    : { path: p, lang: "java", ai: $("#ai").checked, verify: $("#verify").checked };
+  $("#go").disabled = true;
+  $("#runstate").textContent = isJar ? "建图中" : "扫描中";
+  $("#runstate").className = "badge gray";
+  $("#findings").innerHTML = `<div class="empty"><div class="e-ic">◌</div>
+    <div class="e-t">${isJar ? "Soot 正在建图" : "正在扫描"}</div>
+    <div class="e-h">${isJar ? "首次建图可能要数十秒" : "通常几秒内完成"}</div></div>`;
+  try {
+    const r = await fetch(isJar ? "/api/jar" : "/api/scan",
+      { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body) });
+    render(await r.json(), isJar);
+  } catch (e) {
+    $("#findings").innerHTML = `<div class="err">请求失败：${esc(e)}</div>`;
+    $("#runstate").textContent = "失败"; $("#runstate").className = "badge gray";
+  } finally {
+    $("#go").disabled = false; health();
+  }
+};
+
+function render(d, isJar){
+  if (!d.ok) {
+    $("#findings").innerHTML = `<div class="err">${esc(d.error)}</div>`;
+    $("#runstate").textContent = "失败"; $("#runstate").className = "badge gray";
+    return;
+  }
+  if (d.pending) {
+    $("#findings").innerHTML = `<div class="empty"><div class="e-ic">◌</div>
+      <div class="e-t">建图仍在进行</div><div class="e-h">job ${esc(d.pending)}，完成后重新点「开始」</div></div>`;
+    $("#runstate").textContent = "进行中"; $("#runstate").className = "badge gray";
+    return;
+  }
+
+  const raw = isJar ? (d.chains ?? 0) : (d.raw_hits ?? 0);
+  const sc = d.status_counts || {};
+  const rev = (sc.needs_review || 0);
+  const dyn = (sc.needs_dynamic || 0);
+
+  $("#k-raw").textContent = raw;
+  $("#k-raw-sub").textContent = isJar ? `候选链 ${d.chains} · ${d.mode} 模式` : `${d.elapsed_s}s · interfile ${ (d.interfile_languages||[]).join(",") || "—" }`;
+  $("#k-rep").textContent = d.reportable ?? 0;
+  $("#k-rep-sub").textContent = isJar ? `图 ${d.graph?.classes ?? 0} 类` : `脚本错误 ${(d.engine_errors||[]).length}`;
+  $("#k-rev").textContent = rev + dyn;
+  $("#k-rev-sub").textContent = `待复核 ${rev} · 需动态 ${dyn}`;
+  if (isJar) {
+    $("#k-graph").textContent = d.graph?.calls ?? 0;
+    $("#k-graph-sub").textContent = `${d.graph?.methods ?? 0} 方法 / ${d.graph?.classes ?? 0} 类`;
+  } else {
+    const c = d.coverage || {};
+    $("#k-graph").textContent = `${c.units_candidate ?? 0}/${c.units_total ?? 0}`;
+    $("#k-graph-sub").textContent = `${c.files ?? 0} 个文件有候选单元`;
+  }
+
+  const items = d.top || [];
+  $("#findings").innerHTML = items.length ? items.map((f,i) => row(f,i)).join("")
+    : `<div class="empty"><div class="e-ic">✓</div><div class="e-t">无可报告结果</div>
+       <div class="e-h">引擎跑完但没有过判定的发现。检查覆盖台账确认范围。</div></div>`;
+
+  const total = Math.max(1, Object.values(sc).reduce((a,b)=>a+b,0));
+  const bars = [["confirmed","已确认","var(--green)"],["needs_review","待复核","var(--amber)"],
+                ["needs_dynamic","需动态","var(--red)"],["rejected","已否证","#9aa1ab"]]
+    .map(([k,label,color]) => {
+      const n = sc[k] || 0, w = Math.round(n / total * 100);
+      return `<div class="bar-row"><span>${label}</span>
+        <span class="bar"><i style="width:${w}%;background:${color}"></i></span><span class="n">${n}</span></div>`;
+    }).join("");
+  $("#dist").innerHTML = bars;
+
+  if (isJar) {
+    $("#cov").innerHTML = `
+      <div class="kv"><span>类</span><span>${d.graph?.classes ?? 0}</span></div>
+      <div class="kv"><span>方法</span><span>${d.graph?.methods ?? 0}</span></div>
+      <div class="kv"><span>调用边</span><span>${d.graph?.calls ?? 0}</span></div>
+      <div class="note">gadget 模式：从 readObject 类入口向前搜索到 sink</div>`;
+  } else {
+    const c = d.coverage || {};
+    $("#cov").innerHTML = `
+      <div class="kv"><span>文件</span><span>${c.files ?? 0}</span></div>
+      <div class="kv"><span>覆盖单元</span><span>${c.units_total ?? 0}</span></div>
+      <div class="kv"><span>有候选</span><span>${c.units_candidate ?? 0}</span></div>
+      <div class="kv"><span>已覆盖</span><span>${c.units_covered ?? 0}</span></div>`;
+  }
+
+  const rules = d.generated_rules || [];
+  $("#rule-count").textContent = rules.length;
+  $("#rules").innerHTML = rules.length
+    ? rules.map(r => `<div class="kv"><span>${esc(r.id)}</span><span>已应用</span></div>
+        <div class="note" style="padding-top:0">${esc(r.reason)}</div>`).join("")
+    : `<div class="note">本次未生成新规则${d.profile ? "（框架：" + esc((d.profile.frameworks||[]).join(", ") || "未识别") + "）" : ""}</div>`;
+
+  $("#artifact").textContent = d.artifacts?.markdown ? "产物已落盘" : "—";
+  $("#artifact").title = d.artifacts?.markdown || "";
+  $("#runstate").textContent = "已完成"; $("#runstate").className = "badge";
+}
+
+function row(f, i){
+  const st = f.status || "?";
+  const trace = (f.trace || []).map(s =>
+    `<li><span class="kind">${esc(s.kind)}</span>${esc(s.text || (s.file + ":" + s.line))}</li>`).join("");
+  return `<div class="row" onclick="toggle(${i})">
+      <div><span class="chip st-${esc(st)}">${esc(LABEL[st] || st)}</span></div>
+      <div><div class="f-title">${esc(f.rule_id)}</div>
+           <div class="f-sub">${esc(f.message || "")}${f.reason ? " · " + esc(f.reason) : ""}</div></div>
+      <div class="f-pf">${esc(f.fingerprint || "")}</div>
+    </div>
+    <div class="trace" id="t${i}" style="display:none"><ol>${trace}</ol></div>`;
+}
+function toggle(i){
+  const el = $("#t" + i);
+  if (el) el.style.display = el.style.display === "none" ? "block" : "none";
+}
+
+/* ---------- views ---------- */
+document.querySelectorAll(".tab").forEach(t => t.onclick = () => showView(t.dataset.view));
+function showView(v){
+  document.querySelectorAll(".tab").forEach(t => t.className = "tab" + (t.dataset.view === v ? " active" : ""));
+  $("#view-overview").hidden = v !== "overview";
+  $("#view-graph").hidden = v !== "graph";
+  $("#view-kb").hidden = v !== "kb";
+  if (v === "kb") loadDocs();
+}
+
+/* ---------- asset graph ---------- */
+async function buildGraph(){
+  const p = $("#g-path").value.trim();
+  if (!p) { $("#g-path").focus(); return; }
+  $("#g-build").disabled = true;
+  $("#g-ndays").innerHTML = `<div class="empty"><div class="e-t">建图中…</div>
+    <div class="e-h">SCA 解析依赖，NVD 按版本区间匹配</div></div>`;
+  try {
+    const d = await (await fetch("/api/graph", { method:"POST",
+      headers:{"Content-Type":"application/json"}, body: JSON.stringify({ path: p, lookup_cves: true }) })).json();
+    if (!d.ok) { $("#g-ndays").innerHTML = `<div class="err">${esc(d.error)}</div>`; return; }
+    renderGraph(d);
+    const s = await (await fetch("/api/graph/summary?db=" + encodeURIComponent(d.db))).json();
+    renderGraphSummary(d, s);
+  } catch (e) {
+    $("#g-ndays").innerHTML = `<div class="err">建图失败：${esc(e)}</div>`;
+  } finally { $("#g-build").disabled = false; }
+}
+
+function renderGraph(d){
+  const c = d.counts || {};
+  $("#g-tech").textContent = c.technologies ?? 0;
+  $("#g-dep").textContent = c.dependencies ?? 0;
+  $("#g-dep-sub").textContent = `来源 ${esc(d.sca_source || "—")}`;
+  $("#g-nday").textContent = c.ndays ?? 0;
+  $("#g-ep").textContent = c.endpoints ?? 0;
+  $("#g-ep-sub").textContent = `${c.features ?? 0} 个功能特征`;
+  $("#g-db").textContent = "已落盘";
+  $("#g-db").title = d.db || "";
+  $("#g-ep-count").textContent = c.endpoints ?? 0;
+  if (!c.ndays) {
+    $("#g-ndays").innerHTML = `<div class="empty"><div class="e-ic">✓</div>
+      <div class="e-t">没有版本命中的 N-day</div>
+      <div class="e-h">依赖 ${c.dependencies ?? 0} 个；无版本号或版本不在任何 CVE 区间内</div></div>`;
+  }
+}
+
+function renderGraphSummary(d, s){
+  const counts = s.counts || {};
+  $("#g-counts").innerHTML = Object.entries(counts)
+    .map(([k,v]) => `<div class="kv"><span>${esc(k)}</span><span>${v}</span></div>`).join("");
+  const nd = s.ndays || [];
+  if (nd.length) {
+    $("#g-ndays").innerHTML = nd.map(n => `
+      <div class="row" style="grid-template-columns:minmax(0,1fr) 70px;cursor:default">
+        <div>
+          <div class="f-title">${esc(n.cve)} <span class="chip st-needs_dynamic">${n.score ?? 0}</span></div>
+          <div class="f-sub">${esc(n.dependency)} ${esc(n.version || "")} · ${esc((n.summary || "").slice(0, 140))}</div>
+        </div>
+        <div class="f-pf">${esc(n.dependency || "")}</div>
+      </div>`).join("");
+  }
+  const eps = s.endpoints || [];
+  $("#g-endpoints").innerHTML = eps.length
+    ? eps.map(e => `<div class="kv"><span>${esc(e.endpoint)}</span><span>${esc(e.file)}:${e.line}</span></div>`).join("")
+    : `<div class="note">未提取到端点</div>`;
+  const FMAP = { OBSERVED:["已观察","st-confirmed"], CONFIRMED:["已确认","st-confirmed"],
+                 DERIVED:["推导","st-needs_review"], INFERRED:["推测","st-needs_dynamic"],
+                 REJECTED:["已推翻","st-rejected"] };
+  const cl = s.vuln_classes || [];
+  $("#g-classes").innerHTML = cl.length
+    ? cl.map(c => {
+        const [label, cls] = FMAP[c.status] || [c.status, "st-rejected"];
+        return `<div class="kv"><span>${esc(c.name)}</span>
+          <span><span class="chip ${cls}">${label}</span> ${c.confidence ?? ""}</span></div>`;
+      }).join("")
+    : `<div class="note">未推断出漏洞类别</div>`;
+}
+
+/* ---------- knowledge base ---------- */
+async function kbSearch(){
+  const q = $("#kb-q").value.trim();
+  if (!q) return;
+  $("#kb-results").innerHTML = `<div class="empty"><div class="e-t">检索中…</div></div>`;
+  try {
+    const d = await (await fetch("/api/kb/search?q=" + encodeURIComponent(q))).json();
+    const hits = d.hits || [];
+    $("#kb-hits").textContent = hits.length + " 条";
+    $("#kb-results").innerHTML = hits.length ? hits.map(h => `
+      <div class="row" style="grid-template-columns:1fr;cursor:default">
+        <div>
+          <div class="f-title">${esc(h.title)}</div>
+          <div class="f-sub" style="margin-top:6px;white-space:pre-wrap">${esc(h.text)}</div>
+          <div class="f-sub" style="color:var(--muted2);margin-top:6px">出处：${esc(h.path || h.title)}</div>
+        </div>
+      </div>`).join("")
+      : `<div class="empty"><div class="e-t">没有匹配</div><div class="e-h">换个关键词，或先入库文档</div></div>`;
+  } catch (e) {
+    $("#kb-results").innerHTML = `<div class="err">检索失败：${esc(e)}</div>`;
+  }
+}
+async function kbIngest(){
+  const p = $("#kb-path").value.trim();
+  if (!p) return;
+  $("#kb-results").innerHTML = `<div class="empty"><div class="e-t">入库中…</div></div>`;
+  try {
+    const d = await (await fetch("/api/kb/ingest", { method:"POST",
+      headers:{"Content-Type":"application/json"}, body: JSON.stringify({ path: p }) })).json();
+    $("#kb-results").innerHTML = d.ok
+      ? `<div class="empty"><div class="e-t">已入库 ${d.docs} 篇</div><div class="e-h">${esc(p)}</div></div>`
+      : `<div class="err">${esc(d.error)}</div>`;
+    loadDocs();
+  } catch (e) { $("#kb-results").innerHTML = `<div class="err">入库失败：${esc(e)}</div>`; }
+}
+async function loadDocs(){
+  try {
+    const d = await (await fetch("/api/kb/docs")).json();
+    const docs = d.docs || [];
+    $("#kb-count").textContent = docs.length;
+    $("#kb-docs").innerHTML = docs.length
+      ? docs.map(x => `<div class="kv"><span>${esc(x.title)}</span><span>${x.chunks} 段</span></div>`).join("")
+      : `<div class="note">尚未入库任何文档</div>`;
+  } catch (e) { /* console offline */ }
+}
+$("#kb-search").onclick = kbSearch;
+$("#kb-preview").onclick = async () => {
+  const q = $("#kb-q").value.trim();
+  if (!q) return;
+  const d = await (await fetch("/api/rag/preview?q=" + encodeURIComponent(q))).json();
+  $("#kb-hits").textContent = `${d.count} 段 / ${d.total_chars} 字符`;
+  $("#kb-results").innerHTML = `
+    <div class="note" style="padding:12px 18px;border-bottom:1px solid var(--line)">
+      检索预览：命中 ${d.count} 段，共 ${d.total_chars} 字符，来源 ${(d.sources||[]).length} 个；
+      <b>不会自动注入</b>，需调用方逐段引用。</div>` +
+    (d.hits || []).map(h => `
+      <div class="row" style="grid-template-columns:1fr;cursor:default">
+        <div><div class="f-title">${esc(h.title)}</div>
+        <div class="f-sub" style="white-space:pre-wrap;margin-top:6px">${esc(h.text)}</div>
+        <div class="f-sub" style="color:var(--muted2);margin-top:6px">${esc(h.path || "")} · ${h.text.length} 字符</div></div>
+      </div>`).join("");
+};
+$("#kb-q").onkeydown = e => { if (e.key === "Enter") kbSearch(); };
+$("#kb-ingest").onclick = kbIngest;
+$("#g-build").onclick = buildGraph;
+
+setMode("src"); health(); loadDocs(); setInterval(health, 20000);
+</script>
+</body>
+</html>

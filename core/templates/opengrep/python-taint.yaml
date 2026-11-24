@@ -1,0 +1,94 @@
+rules:
+  - id: py-sqli-cursor-execute
+    mode: taint
+    languages: [python]
+    severity: ERROR
+    options:
+      interfile: true
+    message: 外部输入流入 SQL 执行
+    metadata:
+      cwe: CWE-89
+    pattern-sources:
+      - patterns:
+          - pattern-either:
+              - pattern: flask.request.args.get(...)
+              - pattern: flask.request.form.get(...)
+              - pattern: request.args.get(...)
+              - pattern: request.form[...]
+              - pattern: request.GET.get(...)
+              - pattern: request.POST.get(...)
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: $CUR.execute($Q, ...)
+              - pattern: $CUR.executemany($Q, ...)
+          - focus-metavariable: $Q
+
+  - id: py-command-injection
+    mode: taint
+    languages: [python]
+    severity: ERROR
+    options:
+      interfile: true
+    message: 外部输入流入命令执行
+    metadata:
+      cwe: CWE-78
+    pattern-sources:
+      - patterns:
+          - pattern-either:
+              - pattern: request.args.get(...)
+              - pattern: request.form.get(...)
+              - pattern: request.GET.get(...)
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: os.system($C)
+              - pattern: os.popen($C)
+              - pattern: subprocess.run($C, ...)
+              - pattern: subprocess.call($C, ...)
+              - pattern: subprocess.Popen($C, ...)
+          - focus-metavariable: $C
+
+  - id: py-unsafe-deserialization
+    mode: taint
+    languages: [python]
+    severity: ERROR
+    options:
+      interfile: true
+    message: 外部输入流入反序列化
+    metadata:
+      cwe: CWE-502
+    pattern-sources:
+      - patterns:
+          - pattern-either:
+              - pattern: request.data
+              - pattern: request.get_data()
+              - pattern: request.body
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: pickle.loads($D)
+              - pattern: yaml.load($D)
+          - focus-metavariable: $D
+
+  - id: py-ssrf-requests
+    mode: taint
+    languages: [python]
+    severity: ERROR
+    options:
+      interfile: true
+    message: 外部输入流入 HTTP 请求（SSRF）
+    metadata:
+      cwe: CWE-918
+    pattern-sources:
+      - patterns:
+          - pattern-either:
+              - pattern: request.args.get(...)
+              - pattern: request.form.get(...)
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: requests.get($U, ...)
+              - pattern: requests.post($U, ...)
+              - pattern: urllib.request.urlopen($U, ...)
+          - focus-metavariable: $U
