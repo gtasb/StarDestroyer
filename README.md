@@ -54,12 +54,35 @@ python web/run.py          # http://127.0.0.1:8770
 
 MCP 接入：`python adapters/mcp_server.py`（stdio），共 18 个工具。
 
+命令行（JSON 入口，宿主集成用）：
+
+```bash
+python cli.py --list
+python cli.py audit_scan --args '{"path": "demo/java", "auto": false}'
+```
+
+## 接入 DeepSeek Harness（dsh）
+
+dsh 是「一切皆插件」的架构，所以二开的形态就是一个 bundle。仓库内
+[`dsh-plugin/`](dsh-plugin/) 把 6 个审计工具注册成原生工具：
+
+```bash
+dsh plugin --profile <name> add ./dsh-plugin
+dsh --profile <name>
+```
+
+插件不重写审计逻辑——它调用仓库根目录的 `cli.py`（一个 JSON 进程边界），
+所以同一套引擎可以同时被 dsh、MCP 宿主和自带控制台复用。
+详见 [dsh-plugin/README.md](dsh-plugin/README.md)。
+
 ## 目录
 
 ```
 core/          引擎、判定、规则生成、图谱、知识库（零 harness 依赖）
 adapters/      MCP 适配层（18 行，只做转发）
+dsh-plugin/    DeepSeek Harness bundle（Cordis 插件）
 web/           自托管控制台
+cli.py         JSON 进程边界，供宿主调用
 demo/          验证用靶子（含刻意保留的漏洞，见下方声明）
 tests/         并发、NVD 版本区间等离线用例
 references/    sink 目录、复核规则、盲区登记
