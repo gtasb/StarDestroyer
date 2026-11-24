@@ -125,15 +125,23 @@ def tabby_audit(target_jar: str, workdir: str | None = None, mode: str = "gadget
 
     workdir = workdir or str(TABBY_WORK / jar.stem)
     tabby.prepare_workspace(workdir, target=str(jar.resolve()), mode=mode)
-    job = tabby.submit_build(workdir, heap=heap)
-    st = jobs.wait(job["job_id"], timeout_s=wait_s)
-    if st.get("state") == "running":
-        return {"ok": True, "pending": job["job_id"],
-                "hint": "构建仍在进行；完成后再次调用即可（图会重新生成）"}
-    if st.get("exit") not in (None, "0"):
-        return {"ok": False, "error": "Tabby 构建失败", "tail": st.get("tail")}
-
     out_dir = pathlib.Path(workdir) / "output" / "dev"
+
+    # A 60s wait cannot cover a large fat jar. If the CSVs are already newer
+    # than the jar, reuse them instead of paying for a second build on retry.
+    csvs = list(out_dir.glob("GRAPHDB_PUBLIC_*.csv"))
+    jar_mtime = jar.stat().st_mtime
+    fresh = len(csvs) >= 7 and all(c.stat().st_mtime >= jar_mtime for c in csvs)
+    if not fresh:
+        job = tabby.submit_build(workdir, heap=heap)
+        st = jobs.wait(job["job_id"], timeout_s=wait_s)
+        if st.get("state") == "running":
+            return {"ok": True, "pending": job["job_id"],
+                    "hint": "建图超过等待窗口。完成后再次调用本工具即可，会复用已产出的 CSV",
+                    "poll": f"job_status('{job['job_id']}')"}
+        if st.get("exit") not in (None, "0"):
+            return {"ok": False, "error": "Tabby 构建失败", "tail": st.get("tail")}
+
     db_path = pathlib.Path(workdir) / "cpg.db"
     if db_path.exists():
         db_path.unlink()  # a stale graph would answer for the previous jar
