@@ -6,71 +6,75 @@ Secrets are never returned in full: the API exposes a masked form plus whether a
 value exists at all.
 """
 
-import json
 import os
 import pathlib
+
+from . import providers, store
 
 CONFIG_DIR = pathlib.Path.home() / ".stardestroyer"
 CONFIG_FILE = CONFIG_DIR / "config.json"
 
 SECRET_KEYS = ("DEEPSEEK_API_KEY", "TAVILY_API_KEY", "NVD_API_KEY")
-PATH_KEYS = ("OPENGREP_BIN", "TABBY_JAR", "OPENSCA_BIN")
-OTHER_KEYS = ("SD_LOG_LEVEL", "AUDIT_INTERFILE_DEPTH")
+PATH_KEYS = ("OPENGREP_BIN", "TABBY_JAR", "OPENSCA_BIN", "DSH_BIN", "GITLEAKS_BIN", "BUILD_JAVA_HOME")
+OTHER_KEYS = ("SD_LOG_LEVEL", "AUDIT_INTERFILE_DEPTH", "REVIEW_MAX", "AUDIT_CONCURRENCY", "AUDIT_ACCESS", "SCA_OSV", "SCA_INDIRECT", "SCA_MAVEN", "POM_ROOTS",
+              "LLM_PROVIDER", "LLM_MODEL", "LLM_BASE_URL")
 ALL_KEYS = SECRET_KEYS + PATH_KEYS + OTHER_KEYS
+
+# What the user exported before we touched anything. apply() writes into the same
+# environment, so without this snapshot our own first write would look like theirs.
+_EXPORTED = {k for k in os.environ if os.environ[k] and (k in ALL_KEYS or providers.is_key(k))}
+
+
+def allowed(key: str) -> bool:
+    return key in ALL_KEYS or providers.is_key(key)
 
 
 def load() -> dict:
-    if not CONFIG_FILE.exists():
-        return {}
-    try:
-        data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) else {}
-    except (OSError, json.JSONDecodeError):
-        return {}
+    data = store.read(CONFIG_FILE, {})
+    return {k: str(v) for k, v in data.items()} if isinstance(data, dict) else {}
 
 
 def save(values: dict) -> dict:
-    data = load()
-    for k, v in values.items():
-        if k not in ALL_KEYS:
-            continue
-        if v is None or v == "":
-            data.pop(k, None)
-        else:
-            data[k] = str(v).strip()
-    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    CONFIG_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    with store.update(CONFIG_FILE, {}) as data:
+        for k, v in values.items():
+            if not allowed(k):
+                continue
+            if v is None or v == "":
+                data.pop(k, None)
+            else:
+                data[k] = str(v).strip()
     apply()
-    return data
+    return load()
 
 
 def apply() -> None:
     """Environment wins over the file: an explicit export must not be shadowed."""
-    for k, v in load().items():
-        if k in ALL_KEYS and not os.environ.get(k):
-            os.environ[k] = v
+    data = load()
+    for k in {*ALL_KEYS, *filter(providers.is_key, data), *filter(providers.is_key, os.environ)}:
+        if k in _EXPORTED:
+            continue
+        if data.get(k):
+            os.environ[k] = data[k]
+        else:
+            os.environ.pop(k, None)
 
 
 def _mask(v: str) -> str:
     if not v:
         return ""
-    if len(v) <= 8:
-        return "*" * len(v)
-    return f"{v[:4]}…{v[-4:]}"
+    return "********" if len(v) < 16 else f"{v[:4]}…{v[-4:]}"
 
 
 def view() -> dict:
     """What the settings page may see: masked secrets, real paths."""
     data = load()
     out = {}
-    for k in ALL_KEYS:
-        env_v = os.environ.get(k, "")
-        file_v = data.get(k, "")
-        value = env_v or file_v
+    for k in (*ALL_KEYS, *sorted(x for x in {*data, *os.environ} if providers.is_key(x))):
+        value = os.environ.get(k, "") or data.get(k, "")
         out[k] = {
-            "value": _mask(value) if k in SECRET_KEYS else value,
+            "value": _mask(value) if k in SECRET_KEYS or providers.is_key(k) else value,
             "set": bool(value),
-            "source": "env" if env_v else ("file" if file_v else ""),
-            "secret": k in SECRET_KEYS,
+            "source": "env" if k in _EXPORTED else ("file" if data.get(k) else ""),
+            "secret": k in SECRET_KEYS or providers.is_key(k),
         }
     return {"path": str(CONFIG_FILE), "keys": out}

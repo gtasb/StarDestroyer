@@ -26,11 +26,26 @@ dsh --profile <name>
 | 工具 | 作用 |
 |---|---|
 | `sd_scan` | 源码审计：画像 → 生成规则 → 污点分析 |
+| `sd_review` | 取上次扫描待复核的发现，由你读码推翻 |
+| `sd_review_verdict` | 回写复核结论，引用会被核对 |
+| `sd_audit_next` / `sd_audit_submit` / `sd_audit_status` | 取审计单元自己审、提交（引用会被核对）、看进度 |
+| `sd_code` | 代码导航：定义、调用者、实现、MyBatis 语句 |
+| `sd_secrets` | 硬编码凭据，值打码 |
 | `sd_jar_audit` | Java 字节码调用图，找 gadget 链 |
 | `sd_sca` | 依赖树 → NVD 版本区间命中 |
+| `sd_sca_triage` / `sd_sca_verdict` | 依赖 CVE 筛选与裁决 |
+| `sd_logs` | 最近日志 |
 | `sd_graph` | 资产图谱（技术/依赖/N-day/端点/功能） |
 | `sd_kb_search` | 知识库检索，带出处 |
 | `sd_web_search` | N-day 触达方式检索（Tavily） |
+
+## 审计会话
+
+控制台和 `audit_run` 起的是另一种会话，不需要安装本 bundle：`core/agents.py` 用 `--patch` 把 `audit.js` 插进
+`headless` profile。它提供代码导航（`sd_symbol` `sd_callers` `sd_implementations` `sd_method` `sd_endpoints`
+`sd_sinks` `sd_advisory`）和 `sd_submit`，并用 `ctx.tools.guard` 只放行被审项目内的 read / grep / glob；`AUDIT_ACCESS` 决定是否加上 shell（默认加）。
+自由审计的会话另有 `sd_findings` `sd_opengrep` `sd_callgraph` `sd_deps`，可以派子 agent（`tool-subagent`，有上限）。
+`catalog.mjs` 从已安装的 dsh 读出服务商与模型目录。
 
 ## 依赖
 

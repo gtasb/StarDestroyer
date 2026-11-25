@@ -10,7 +10,9 @@ import sys
 import threading
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
+__import__("os").environ["SCA_OSV"] = "0"  # offline
 
+import _env  # noqa: F401
 from core import graph, pools
 
 DB = pathlib.Path(__file__).resolve().parents[1] / ".work" / "tabby" / "gadget" / "cpg.db"

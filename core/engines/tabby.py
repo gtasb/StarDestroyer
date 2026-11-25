@@ -2,17 +2,25 @@
 
 Verified against tabby-sec/tabby v2.0.1 source, not documentation:
 
+- It remembers analysed jars in rules/ignores.json and silently skips them later
+  ("Total analyse 0 targets"), so a second run of the same jar yields an empty graph.
 - The CLI takes no arguments; it reads ./config/settings.properties from the
   working directory (run.sh: `java -Xmx16g -jar target/tabby.jar`).
 - The build stage writes into an H2 in-memory database, not Neo4j. CSV export is
   a first-class path (RelationshipsService.save*ToCsv), so the graph can be
   reconstructed without a server.
 - Edge types are CALL, ALIAS, EXTEND, HAS, INTERFACES.
+- ALIAS points from the declaring method (interface / superclass) to the override.
+  Without it every interface call is a dead end: commons-collections'
+  Transformer.transform never reaches InvokerTransformer.transform.
 
 Ingest is serialised by the tabby_ingest pool: one Soot/JVM build at a time.
 """
 
 import csv
+import hashlib
+import re
+import shutil
 import sys
 import os
 import pathlib
@@ -56,6 +64,7 @@ tabby.build.object.maxTriggerTimes        = 300
 tabby.build.with.cache.enable             = false
 tabby.build.timeout.forceStop             = true
 tabby.build.isNeedToProcessXml            = true
+tabby.build.isNeedToCreateIgnoreList      = false
 """
 
 
@@ -71,6 +80,13 @@ def prepare_workspace(workdir: str, target: str, libraries: str = "",
     (d / "output").mkdir(parents=True, exist_ok=True)
     rules = (rules_dir or os.environ.get("TABBY_RULES")
              or str(pathlib.Path(jar()).parent / "rules"))
+    # Tabby appends the MD5 of every jar it has analysed to rules/ignores.json and
+    # skips those jars from then on -- in this project and in every other one. Each
+    # build gets its own copy of the rules, without that list.
+    private = d / "rules"
+    shutil.rmtree(private, ignore_errors=True)
+    shutil.copytree(rules, private, ignore=shutil.ignore_patterns("ignores.json"))
+    rules = str(private.resolve())
     # Java .properties treat backslash as an escape character; a Windows path
     # written raw loses its separators ("D:\a\b" -> "D:ab").
     def posix(p: str) -> str:
@@ -89,8 +105,39 @@ def prepare_workspace(workdir: str, target: str, libraries: str = "",
     return d
 
 
-def build_command(heap: str = "8g") -> str:
-    return f'java -Xmx{heap} -jar "{jar()}"'
+MODES = ("gadget", "web")
+
+
+def content_key(target: str) -> str:
+    """Identity of what is being analysed: same name is not same code, and a
+    copied jar keeps an old mtime."""
+    p = pathlib.Path(target)
+    h = hashlib.sha256()
+    files = [p] if p.is_file() else sorted(f for f in p.rglob("*") if f.is_file())
+    for f in files:
+        if p.is_dir():
+            h.update(f.relative_to(p).as_posix().encode() + b"\0")
+        with f.open("rb") as fh:
+            while block := fh.read(1 << 20):
+                h.update(block)
+        h.update(b"\0")
+    return h.hexdigest()[:12]
+
+
+def invalid_options(heap: str, mode: str) -> str | None:
+    """Both values reach a process or its config file; only known shapes pass."""
+    if not re.fullmatch(r"[1-9]\d{0,5}[mMgG]", str(heap)):
+        return "heap 格式无效，应为数字加 m/g，如 4g"
+    if mode not in MODES:
+        return f"mode 无效，可选 {' / '.join(MODES)}"
+    return None
+
+
+def build_command(heap: str = "8g") -> list[str]:
+    err = invalid_options(heap, MODES[0])
+    if err:
+        raise ValueError(err)
+    return [shutil.which("java") or "java", f"-Xmx{heap}", "-jar", jar()]
 
 
 def submit_build(workdir: str, heap: str = "8g") -> dict:
@@ -110,7 +157,10 @@ CSV_NAMES = {
     "METHODS": "GRAPHDB_PUBLIC_METHODS.csv",
     "CLASSES": "GRAPHDB_PUBLIC_CLASSES.csv",
     "CALL": "GRAPHDB_PUBLIC_CALL.csv",
+    "ALIAS": "GRAPHDB_PUBLIC_ALIAS.csv",
 }
+MAX_DEPTH = 12     # keep in step with templates/cypher/gadget-chain.cypher
+MAX_PATHS = 20000  # rows pulled before per-pair dedup; hitting it is reported
 TEMPLATES = pathlib.Path(__file__).resolve().parents[1] / "templates" / "cypher"
 
 GADGET_ENTRIES = ["readObject", "readResolve", "readExternal", "readObjectNoData"]
@@ -138,78 +188,79 @@ def _rows(output_dir: str, key: str) -> list[dict]:
 
 
 def load_graph(output_dir: str, db_path: str) -> dict:
-    """Import Tabby's CSV export into the embedded graph."""
-    from .. import graph
+    """Import Tabby's CSV export into a fresh embedded graph."""
+    from .. import graph, logging, proc
 
     conn = graph.open_db(db_path)
+    try:
+        return {"conn": conn, **_load(conn, output_dir, graph, logging, proc)}
+    except BaseException:
+        graph.close(conn)  # an open handle would block deleting the half-loaded file
+        raise
+
+
+def _load(conn, output_dir, graph, logging, proc) -> dict:
     graph.ensure_node_table(conn, "Method", {
         "id": "STRING", "name": "STRING", "cls": "STRING", "sig": "STRING",
-        "vul": "STRING", "is_sink": "STRING", "serial": "STRING",
+        "vul": "STRING", "is_sink": "STRING", "serial": "STRING", "is_endpoint": "STRING",
     })
     graph.ensure_node_table(conn, "Class", {
         "id": "STRING", "name": "STRING", "serial": "STRING", "super": "STRING",
     })
     graph.ensure_rel_table(conn, "CALL", "Method", "Method", {"line": "INT64"})
+    graph.ensure_rel_table(conn, "ALIAS", "Method", "Method")
 
-    methods = ({
-        "id": r["ID"], "name": r.get("NAME", ""), "cls": r.get("CLASSNAME", ""),
-        "sig": r.get("SIGNATURE", ""), "vul": r.get("VUL", "") or "",
-        "is_sink": r.get("IS_SINK", ""), "serial": r.get("IS_SERIALIZABLE", ""),
-    } for r in _iter_rows(output_dir, "METHODS"))
-    classes = ({
-        "id": r["ID"], "name": r.get("NAME", ""),
-        "serial": r.get("IS_SERIALIZABLE", ""), "super": r.get("SUPER_CLASS", ""),
-    } for r in _iter_rows(output_dir, "CLASSES"))
-    calls = ({
-        "src": r["SOURCE"], "dst": r["TARGET"],
-        "line": int(r["LINE_NUM"]) if r.get("LINE_NUM", "").isdigit() else 0,
-    } for r in _iter_rows(output_dir, "CALL") if r["SOURCE"] != r["TARGET"])
+    ids: set[str] = set()
 
-    from .. import logging
-    def _drain(rows, label, props, rel=False, edges_props=None):
-        batch, n = [], 0
-        for row in rows:
-            batch.append(row)
-            if len(batch) >= 20000:
-                if rel:
-                    graph.insert_edges_batch(conn, label, batch, "Method", "Method",
-                                             props=edges_props)
-                else:
-                    graph.upsert_nodes_batch(conn, label, batch, props)
-                n += len(batch)
-                batch = []
-        if batch:
-            if rel:
-                graph.insert_edges_batch(conn, label, batch, "Method", "Method",
-                                         props=edges_props)
+    def fresh(rows, seen):
+        for i, row in enumerate(rows):
+            if i % 20000 == 0:
+                proc.check()
+            if row[0] not in seen:
+                seen.add(row[0])
+                yield row
+
+    def edges(key):
+        seen: set[tuple] = set()
+        for i, r in enumerate(_iter_rows(output_dir, key)):
+            if i % 20000 == 0:
+                proc.check()
+            pair = (r["SOURCE"], r["TARGET"])
+            # COPY fails on an edge whose endpoint is absent.
+            if pair[0] == pair[1] or pair in seen or pair[0] not in ids or pair[1] not in ids:
+                continue
+            seen.add(pair)
+            if key == "CALL":
+                line = r.get("LINE_NUM") or ""
+                yield (*pair, int(line) if line.isdigit() else 0)
             else:
-                graph.upsert_nodes_batch(conn, label, batch, props)
-            n += len(batch)
-        return n
+                yield pair
 
-    method_ids: set[str] = set()
-
-    def _methods():
-        for row in methods:
-            method_ids.add(row["id"])
-            yield row
-
-    n_methods = _drain(_methods(), "Method", ["name", "cls", "sig", "vul", "is_sink", "serial"])
-    n_classes = _drain(classes, "Class", ["name", "serial", "super"])
-    # An edge whose endpoint is absent makes Kùzu's MERGE fail on an empty match.
-    n_calls = _drain((c for c in calls
-                      if c["src"] in method_ids and c["dst"] in method_ids),
-                     "CALL", None, rel=True, edges_props=["line"])
+    n_methods = graph.copy_rows(conn, "Method", fresh((
+        (r["ID"], r.get("NAME", ""), r.get("CLASSNAME", ""), r.get("SIGNATURE", ""),
+         r.get("VUL") or "", r.get("IS_SINK", ""), r.get("IS_SERIALIZABLE", ""),
+         r.get("IS_ENDPOINT", "")) for r in _iter_rows(output_dir, "METHODS")), ids))
+    n_classes = graph.copy_rows(conn, "Class", fresh((
+        (r["ID"], r.get("NAME", ""), r.get("IS_SERIALIZABLE", ""), r.get("SUPER_CLASS", ""))
+        for r in _iter_rows(output_dir, "CLASSES")), set()))
+    n_calls = graph.copy_rows(conn, "CALL", edges("CALL"))
+    n_alias = graph.copy_rows(conn, "ALIAS", edges("ALIAS"))
     logging.info("tabby", "graph loaded", methods=n_methods, classes=n_classes,
-                 calls=n_calls)
-    return {"conn": conn, "methods": n_methods, "classes": n_classes, "calls": n_calls}
+                 calls=n_calls, aliases=n_alias)
+    return {"methods": n_methods, "classes": n_classes, "calls": n_calls, "aliases": n_alias}
 
 
-def find_gadget_chains(conn, limit: int = 20, entries: list[str] | None = None) -> list[dict]:
+def find_gadget_chains(conn, limit: int = 20, entries: list[str] | None = None,
+                       mode: str = "gadget") -> dict:
+    """{chains, total, truncated}. One shortest path per entry/sink method pair;
+    `limit` applies after dedup, so duplicates never push a real chain out."""
     from .. import graph
 
-    cypher = (TEMPLATES / "gadget-chain.cypher").read_text(encoding="utf-8")
-    rows = graph.query(conn, cypher, {"entries": entries or GADGET_ENTRIES, "limit": limit})
+    cypher = (TEMPLATES / f"{mode}-chain.cypher").read_text(encoding="utf-8")
+    params = {"limit": MAX_PATHS}
+    if mode == "gadget":
+        params["entries"] = entries or GADGET_ENTRIES
+    rows = graph.query(conn, cypher, params)
     out, seen = [], set()
     for r in rows:
         trace = graph.render_path(r)
@@ -226,7 +277,12 @@ def find_gadget_chains(conn, limit: int = 20, entries: list[str] | None = None) 
             "depth": r["depth"],
             "trace": trace,
         })
-    return out
+    # JDK-internal chains exist in every jar and are short; the limit must cut
+    # those, never a chain that starts in the audited code.
+    order = {"project": 0, "mixed": 1, "library": 2}
+    out.sort(key=lambda c: (order[chain_scope(c)], c["depth"]))
+    return {"chains": out[:limit], "total": len(out),
+            "truncated": len(out) > limit or len(rows) >= MAX_PATHS}
 
 
 # Anything under these prefixes is not the audited project's own code.
@@ -250,7 +306,7 @@ def chain_scope(chain: dict) -> str:
     return "project"
 
 
-def to_records(chains: list[dict]) -> list[dict]:
+def to_records(chains: list[dict], key: str = "", mode: str = "gadget") -> list[dict]:
     from .. import records, verdict
 
     out = []
@@ -265,13 +321,18 @@ def to_records(chains: list[dict]) -> list[dict]:
                  "reason": "链经过库边界，静态不可验" if scope == "mixed" else "入口在库内，非本项目代码",
                  "missing": "运行时验证", "source": "tabby"}
         finding = {
-            "rule_id": f"tabby-gadget-{ch['vul'].lower()}",
+            "rule_id": f"tabby-{mode}-{ch['vul'].lower()}",
             "file": ch["entry"].rsplit(".", 1)[0],
             "line": None,
             "message": f"{ch['entry']} → {ch['sink']} ({ch['vul']})",
-            "trace": [{"kind": "entrypoint" if i == 0 else "propagation",
+            "trace": [{"kind": "entrypoint" if i == 0 else "sink" if i == len(ch["trace"]) - 1 else "propagation",
                        "file": s.get("file", ""), "line": s.get("line"),
                        "text": s.get("text", "")} for i, s in enumerate(ch["trace"])],
         }
-        out.append(records.make(finding, v, ""))
+        rec = records.make(finding, v, "")
+        # No source file to pin, but the analysed bytes are: key is their hash.
+        rec["suppress_key"] = f"tabby-{key}-{mode}-{rec['fingerprint']}" if key else ""
+        # A chain inside the JDK exists in every jar; one that starts here is ours.
+        rec["severity"] = {"project": "high", "mixed": "medium"}.get(scope, "low")
+        out.append(rec)
     return out

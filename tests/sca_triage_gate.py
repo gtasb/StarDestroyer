@@ -10,7 +10,9 @@ import sys
 import tempfile
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
+__import__("os").environ["SCA_OSV"] = "0"  # offline
 
+import _env  # noqa: F401
 from core import sca_triage
 
 

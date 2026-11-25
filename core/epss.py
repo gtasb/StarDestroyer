@@ -17,7 +17,11 @@ CACHE = pathlib.Path(__file__).resolve().parents[1] / ".work" / "epss"
 
 
 def scores(cve_ids: list[str]) -> dict[str, dict]:
-    """{cve: {epss, percentile, date}}; unknown ids are simply absent."""
+    """{cve: {epss, percentile, date}}; unknown ids are simply absent.
+
+    Ids whose request failed come back as {"failed": True}: "we could not ask" is
+    not "low probability", and it is never cached.
+    """
     ids = sorted({c for c in cve_ids if c})
     if not ids:
         return {}
@@ -30,12 +34,15 @@ def scores(cve_ids: list[str]) -> dict[str, dict]:
             pass
 
     out: dict[str, dict] = {}
+    failed = False
     for i in range(0, len(ids), 100):  # the API caps at 100 per request
         chunk = ids[i:i + 100]
         url = f"{API}?{urllib.parse.urlencode({'cve': ','.join(chunk)})}"
         try:
             doc = net.request_json(url, headers={"User-Agent": "stardestroyer/0.1"})
         except Exception:
+            failed = True
+            out.update({c: {"failed": True} for c in chunk})
             continue
         for row in doc.get("data", []):
             out[row["cve"]] = {
@@ -43,5 +50,6 @@ def scores(cve_ids: list[str]) -> dict[str, dict]:
                 "percentile": float(row.get("percentile") or 0),
                 "date": row.get("date"),
             }
-    key.write_text(json.dumps(out, ensure_ascii=False), encoding="utf-8")
+    if not failed:
+        key.write_text(json.dumps(out, ensure_ascii=False), encoding="utf-8")
     return out

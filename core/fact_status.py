@@ -23,6 +23,9 @@ def promote(existing: str | None, incoming: str | None) -> str:
         e, i = FactStatus[existing], FactStatus[incoming or "INFERRED"]
     except KeyError:
         return existing
+    # A rejection overrides a guess, never an observation or a confirmation.
+    if i is FactStatus.REJECTED:
+        return i.name if e in (FactStatus.INFERRED, FactStatus.DERIVED) else e.name
     if e is FactStatus.REJECTED and i not in (FactStatus.OBSERVED, FactStatus.CONFIRMED):
         return existing
     return i.name if i.value > e.value else existing
