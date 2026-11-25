@@ -9,6 +9,7 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
+import _env  # noqa: F401
 from core import nvd
 
 CVE_2015_6420 = [
@@ -27,7 +28,7 @@ def main() -> int:
         got = any(nvd._version_in_range(version, cm) for cm in CVE_2015_6420)
         if got != expected:
             failures.append(f"{version}: expected {expected}, got {got}")
-    print("cpe product of 'commons-collections' ->", nvd._cpe_product("commons-collections"))
+    print("cpe product of 'commons-collections' ->", nvd._cpe_products("commons-collections"))
     if failures:
         print("FAIL:", "; ".join(failures))
         return 1

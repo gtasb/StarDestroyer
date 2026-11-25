@@ -1,7 +1,7 @@
 # Sink 目录
 
-按语言维护。每条给出：入口 → 汇聚点 → 需要的净化。规则文件在 `core/templates/opengrep/`，
-本文件只解释「为什么这些是 sink」，不复制规则。
+按语言维护。每条给出：入口 → 汇聚点 → 需要的净化。规则定义在 `core/rulebase.py`，
+本文件只解释「为什么这些是 sink」，不复制规则。每类都有样例测试：`tests/rules.py`。
 
 ## Java
 
@@ -13,7 +13,9 @@
 | SSRF | 同上 | `URL.openConnection` / `RestTemplate.exchange` | 目标域名白名单 |
 | 反序列化 | `getInputStream` | `ObjectInputStream.readObject` | `ObjectInputFilter` 白名单类 |
 | 路径穿越 | 同上 | `new File(base, name)` | `normalize()` 后校验前缀 |
-| XSS | 同上 | 直接拼接进响应 | 模板引擎默认转义 |
+| XSS | 同上 | `getWriter().write/print` | 模板引擎默认转义 / `htmlEscape` |
+| XXE | 同上 | `DocumentBuilder.parse` / `SAXParser.parse` | 禁用外部实体 |
+| 开放重定向 | 同上 | `sendRedirect` | 目标白名单 |
 
 ## Python
 
@@ -24,6 +26,8 @@
 | 反序列化 | `request.data` | `pickle.loads` / `yaml.load` | `yaml.safe_load`；禁 pickle |
 | SSRF | 同上 | `requests.*` / `urlopen` | 目标校验 + 禁内网段 |
 | SSTI | 同上 | `render_template_string` | 不渲染用户模板 |
+| 代码执行 | 同上 | `eval` / `exec` | `ast.literal_eval` |
+| 路径穿越 | 同上 | `open` / `send_file` | `secure_filename` |
 
 ## Go
 

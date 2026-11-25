@@ -9,7 +9,9 @@ What this store cannot do is run `tabby.algo.*` procedures. Path search is done
 with plain Cypher instead; templates live in core/templates/cypher/.
 """
 
+import csv
 import pathlib
+import tempfile
 
 import kuzu
 
@@ -120,6 +122,26 @@ def insert_edges_batch(conn: kuzu.Connection, rel: str, edges: list[dict],
     return len(edges)
 
 
+def copy_rows(conn: kuzu.Connection, table: str, rows) -> int:
+    """Bulk load an iterable of tuples in column order into an empty table.
+
+    MERGE takes over a minute per 20k edges on a large graph; COPY loads 800k in
+    seconds. The caller guarantees unique keys and existing endpoints.
+    """
+    with tempfile.TemporaryDirectory(prefix="sd-copy-") as d:
+        path = pathlib.Path(d) / "rows.csv"
+        n = 0
+        with path.open("w", newline="", encoding="utf-8") as fh:
+            w = csv.writer(fh, quoting=csv.QUOTE_ALL)
+            for row in rows:
+                w.writerow(row)
+                n += 1
+        if n:
+            conn.execute(f"COPY {table} FROM '{path.as_posix()}' "
+                         "(header=false, parallel=false, escape='\"')")
+    return n
+
+
 def query(conn: kuzu.Connection, cypher: str, params: dict | None = None) -> list[dict]:
     r = conn.execute(cypher, params or {})
     cols = r.get_column_names()
@@ -141,14 +163,17 @@ def render_path(row: dict) -> list[dict]:
     nodes = path.get("_nodes") if isinstance(path, dict) else getattr(path, "_nodes", None)
     if not nodes:
         return []
+    rels = (path.get("_rels") if isinstance(path, dict) else getattr(path, "_rels", None)) or []
     steps = []
-    for n in nodes:
+    for i, n in enumerate(nodes):
+        call = rels[i] if i < len(rels) and isinstance(rels[i], dict) else {}
         cls = n.get("cls") or n.get("classname") or ""
         name = n.get("name") or n.get("methodname") or n.get("id", "")
         steps.append({
             "kind": "propagation",
             "file": n.get("file") or "",
-            "line": n.get("line") or n.get("start_line"),
+            # where this method calls the next one; CALL edges carry it
+            "line": n.get("line") or n.get("start_line") or call.get("line") or None,
             "text": f"{cls}.{name}" if cls else str(name),
             "id": n.get("id", ""),
         })

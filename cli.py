@@ -36,6 +36,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(prog="stardestroyer", description=__doc__)
     ap.add_argument("tool", nargs="?", help="tool name, e.g. audit_scan")
     ap.add_argument("--args", default=None, help="JSON object with tool arguments")
+    ap.add_argument("--args-file", default=None, help="file holding that JSON object (no shell quoting)")
     ap.add_argument("--list", action="store_true", help="list available tools")
     ns = ap.parse_args()
 
@@ -49,8 +50,11 @@ def main() -> int:
         print(json.dumps({"ok": False, "error": f"unknown tool: {ns.tool}"}, ensure_ascii=False))
         return 2
 
+    if ns.args_file:
+        ns.args = pathlib.Path(ns.args_file).read_text(encoding="utf-8-sig")
     raw = ns.args if ns.args is not None else (
-        "" if sys.stdin.isatty() else sys.stdin.buffer.read().decode("utf-8", "replace"))
+        "" if sys.stdin is None or sys.stdin.isatty()
+        else sys.stdin.buffer.read().decode("utf-8-sig", "replace"))
     try:
         kwargs = json.loads(raw) if raw.strip() else {}
     except json.JSONDecodeError as exc:
@@ -58,12 +62,14 @@ def main() -> int:
         return 2
 
     try:
-        result = fn(**kwargs)
-        if inspect.isawaitable(result):
-            result = asyncio.run(result)
+        inspect.signature(fn).bind(**kwargs)
     except TypeError as exc:
         print(json.dumps({"ok": False, "error": f"bad arguments: {exc}"}, ensure_ascii=False))
         return 2
+    try:
+        result = fn(**kwargs)
+        if inspect.isawaitable(result):
+            result = asyncio.run(result)
     except Exception as exc:  # a tool crash must still answer in JSON
         print(json.dumps({"ok": False, "error": f"{type(exc).__name__}: {exc}"}, ensure_ascii=False))
         return 1

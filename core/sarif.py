@@ -6,17 +6,21 @@ SARIF is the interchange format consumers expect. One scan, two artifacts.
 
 import json
 import pathlib
+from urllib.parse import quote
 
-TOOL = {
-    "driver": {
-        "name": "stardestroyer",
-        "informationUri": "https://github.com/opengrep/opengrep",
-        "rules": [],
-    }
-}
+def _uri(path: str) -> dict:
+    """Relative artifacts resolve against SRCROOT; absolute ones become file URIs."""
+    p = (path or "").replace("\\", "/")
+    if p[1:3] == ":/":
+        return {"uri": "file:///" + quote(p, safe="/:")}
+    if p.startswith("/"):
+        return {"uri": "file://" + quote(p)}
+    return {"uri": quote(p), "uriBaseId": "SRCROOT"}
 
 
-def to_sarif(findings: list[dict]) -> dict:
+def to_sarif(findings: list[dict], gaps: list[str] | None = None) -> dict:
+    driver = {"name": "stardestroyer",
+              "informationUri": "https://github.com/opengrep/opengrep", "rules": []}
     rules: dict[str, int] = {}
     results = []
 
@@ -24,7 +28,7 @@ def to_sarif(findings: list[dict]) -> dict:
         rid = f.get("rule_id", "unknown")
         if rid not in rules:
             rules[rid] = len(rules)
-            TOOL["driver"]["rules"].append({"id": rid, "name": rid})
+            driver["rules"].append({"id": rid, "name": rid})
         v = f.get("verdict") or {}
         status = f.get("status") or v.get("status")
         reason = f.get("reason") or v.get("reason", "")
@@ -36,7 +40,7 @@ def to_sarif(findings: list[dict]) -> dict:
             "partialFingerprints": {"stableFingerprint": f.get("fingerprint", "")},
             "locations": [{
                 "physicalLocation": {
-                    "artifactLocation": {"uri": f.get("file", "")},
+                    "artifactLocation": _uri(f.get("file", "")),
                     "region": {"startLine": f.get("line") or 1},
                 }
             }],
@@ -45,7 +49,7 @@ def to_sarif(findings: list[dict]) -> dict:
                     "locations": [
                         {"location": {
                             "physicalLocation": {
-                                "artifactLocation": {"uri": s.get("file", "")},
+                                "artifactLocation": _uri(s.get("file", "")),
                                 "region": {"startLine": s.get("line") or 1},
                             },
                             "message": {"text": f"{s.get('kind', '')}: {s.get('text', '')}"},
@@ -59,11 +63,16 @@ def to_sarif(findings: list[dict]) -> dict:
 
     return {"$schema": "https://json.schemastore.org/sarif-2.1.0.json",
             "version": "2.1.0",
-            "runs": [{"tool": TOOL, "results": results}]}
+            "runs": [{"tool": {"driver": driver}, "results": results,
+                      "invocations": [{
+                          "executionSuccessful": not gaps,
+                          "toolExecutionNotifications": [
+                              {"level": "warning", "message": {"text": g}} for g in gaps or []],
+                      }]}]}
 
 
-def write_sarif(findings: list[dict], path: str) -> str:
+def write_sarif(findings: list[dict], path: str, gaps: list[str] | None = None) -> str:
     p = pathlib.Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(to_sarif(findings), ensure_ascii=False, indent=2), encoding="utf-8")
+    p.write_text(json.dumps(to_sarif(findings, gaps), ensure_ascii=False, indent=2), encoding="utf-8")
     return str(p)

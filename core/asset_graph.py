@@ -12,9 +12,10 @@ import hashlib
 import pathlib
 import time
 
-from . import endpoints, graph, profile, sca
+from . import endpoints, graph, proc, profile, sca
 from .fact_status import DEFAULT_CONFIDENCE, promote
 
+NO_CVE = "本次未查询 CVE（lookup_cves=false）"
 DB_DIR = pathlib.Path(__file__).resolve().parents[1] / ".work" / "asset-graph"
 
 _BASE = {"status": "STRING", "confidence": "DOUBLE"}
@@ -64,8 +65,10 @@ VULN_KEYWORDS = [
     ("authentication bypass", "认证绕过"), ("authorization", "越权"),
 ]
 
-RULE_CLASS = [("sqli", "SQL 注入"), ("cmd", "命令注入"), ("deser", "反序列化"),
-              ("ssrf", "SSRF"), ("spel", "表达式注入")]
+RULE_CLASS = [("sqli", "SQL 注入"), ("cmd", "命令注入"), ("command", "命令注入"),
+              ("deser", "反序列化"), ("ssrf", "SSRF"), ("spel", "表达式注入"),
+              ("code-injection", "代码执行"), ("path-traversal", "路径穿越"), ("xxe", "XXE"),
+              ("xss", "XSS"), ("ssti", "模板注入"), ("redirect", "开放重定向"), ("exec", "命令注入")]
 
 
 def _h(*parts: str) -> str:
@@ -148,7 +151,7 @@ def build(project_root: str, findings: list[dict] | None = None,
     dep_nodes, dep_edges, nday_nodes, affected, evidences = [], [], [], [], []
     ev_nday_edges, ev_dep_edges = [], []
     for c in comps.get("components", []):
-        if not c.get("name"):
+        if not c.get("name") or c.get("root"):
             continue
         did = _h("dep", c["name"], c.get("version", ""))
         dep_nodes.append(_node(NODES["Dependency"], dep_status, id=did, name=c["name"],
@@ -209,7 +212,9 @@ def build(project_root: str, findings: list[dict] | None = None,
     graph.insert_edges_batch(conn, "SUGGESTS_NDAY", nday_class_edges, "NDay", "VulnClass")
 
     # ---- endpoints / capabilities --------------------------------------
-    eps = endpoints.extract(str(root))
+    proc.stage("提取端点")
+    found = endpoints.scan(str(root))
+    eps = found["endpoints"]
     ep_nodes, ep_edges, feat, exposes, ep_ev, ev_ep_edges = [], [], {}, [], [], []
     for e in eps:
         eid = _h("ep", e["method"], e["path"], e["file"], str(e["line"]))
@@ -240,13 +245,15 @@ def build(project_root: str, findings: list[dict] | None = None,
     ep_by_file = [(e["file"], _h("ep", e["method"], e["path"], e["file"], str(e["line"])))
                   for e in eps]
     for f in findings or []:
+        if f.get("status") == "rejected":
+            continue
         fid = f.get("fingerprint") or _h("finding", f.get("rule_id", ""), f.get("file", ""))
         status = "CONFIRMED" if f.get("status") == "confirmed" else "INFERRED"
         find_nodes.append(_node(NODES["Finding"], status, id=fid, name=f.get("rule_id", ""),
                                 status_finding=f.get("status", ""), rule_id=f.get("rule_id", ""),
                                 file=f.get("file", ""), line=f.get("line") or 0))
         for ep_file, eid in ep_by_file:
-            if ep_file.endswith(f.get("file", "\0")):
+            if f.get("file") and ep_file == f["file"]:
                 covers.append({"src": fid, "dst": eid})
         label = _rule_class(f.get("rule_id", ""))
         if label:
@@ -263,6 +270,10 @@ def build(project_root: str, findings: list[dict] | None = None,
         graph.insert_edges_batch(conn, "SUGGESTS_FINDING", find_class_edges, "Finding", "VulnClass")
 
     graph.close(conn)
+    by_file: dict[str, int] = {}
+    for f in findings or []:
+        if f.get("status") != "rejected":
+            by_file[f.get("file", "")] = by_file.get(f.get("file", ""), 0) + 1
 
     return {
         "ok": True,
@@ -282,6 +293,17 @@ def build(project_root: str, findings: list[dict] | None = None,
         "sca_error": comps.get("opensca_error"),
         "nvd_lookups": comps.get("lookups"),
         "nvd_skipped": comps.get("skipped"),
+        "unresolved": comps.get("unresolved") or [],
+        "incomplete_reasons": (list(comps.get("incomplete_reasons") or []) if lookup_cves
+                               else [NO_CVE])
+        + (["源文件过多，端点提取不完整"] if found["truncated"] else []),
+        # What the console shows, so it never has to open the database.
+        "endpoints": [{**e, "findings": by_file.get(e["file"], 0)} for e in eps],
+        "dependencies": [{"group": c.get("vendor", ""), "name": c["name"], "version": c.get("version", ""),
+                          "direct": bool(c.get("direct")), "language": c.get("language", ""),
+                          "cves": [{"id": v["id"], "score": v.get("score")} for v in c.get("cves") or []]}
+                         for c in comps.get("components", []) if c.get("name") and not c.get("root")],
+        "technologies": prof.get("frameworks", []),
     }
 
 

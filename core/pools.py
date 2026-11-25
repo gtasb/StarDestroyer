@@ -14,7 +14,6 @@ _DEFAULT_LIMITS = {
     "neo4j_query": 3,   # variable-length path queries; heap is the hard ceiling
     "tabby_ingest": 1,  # Soot builds the graph in one JVM: must be serial
     "opengrep": 4,      # OCaml multicore; do not match core count
-    "llm": 8,           # sized to TPM quota
 }
 
 
@@ -31,7 +30,7 @@ POOLS: dict[str, asyncio.Semaphore] = {
 def stats() -> dict:
     """Free slots per pool, for the console's health line."""
     return {
-        name: {"limit": _DEFAULT_LIMITS[name], "free": sem._value}
+        name: {"limit": _limit(name), "free": sem._value}
         for name, sem in POOLS.items()
     }
 
@@ -44,10 +43,12 @@ async def acquire(*resources):
     unknown = [r for r in order if r not in POOLS]
     if unknown:
         raise KeyError(f"unknown pool(s): {unknown}")
-    for r in order:
-        await POOLS[r].acquire()
+    held = []
     try:
+        for r in order:  # cancelled while waiting for the second: give back the first
+            await POOLS[r].acquire()
+            held.append(r)
         yield
     finally:
-        for r in reversed(order):
+        for r in reversed(held):
             POOLS[r].release()

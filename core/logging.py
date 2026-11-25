@@ -16,7 +16,7 @@ import threading
 import time
 
 LEVELS = {"DEBUG": 10, "INFO": 20, "WARN": 30, "ERROR": 40}
-LOG_DIR = pathlib.Path(__file__).resolve().parents[1] / ".work" / "logs"
+LOG_DIR = pathlib.Path(os.environ.get("SD_LOG_DIR") or pathlib.Path(__file__).resolve().parents[1] / ".work" / "logs")
 LOG_FILE = LOG_DIR / "stardestroyer.log"
 MAX_BYTES = 5 * 1024 * 1024
 
@@ -30,20 +30,22 @@ def _threshold() -> int:
 
 
 def _fmt(v) -> str:
-    if isinstance(v, str):
-        return v if " " not in v else json.dumps(v, ensure_ascii=False)
     if isinstance(v, (int, float, bool)):
         return str(v)
-    return json.dumps(v, ensure_ascii=False)
+    # Anything that could break the one-line format is quoted: paths and engine
+    # messages come from the audited tree and must not be able to forge a line.
+    if isinstance(v, str) and v.isprintable() and " " not in v:
+        return v
+    return json.dumps(v, ensure_ascii=False, default=str)
 
 
-def log(level: str, component: str, message: str, **fields) -> dict | None:
+def log(level: str, component: str, message: str, /, **fields) -> dict | None:
     level = level.upper()
     if LEVELS.get(level, 20) < _threshold():
         return None
     ts = time.strftime("%Y-%m-%d %H:%M:%S")
     kv = "  " + " ".join(f"{k}={_fmt(v)}" for k, v in fields.items()) if fields else ""
-    line = f"{ts} {level:<5} {component:<10} {message}{kv}"
+    line = f"{ts} {level:<5} {component:<10} {message}{kv}".replace("\r", " ").replace("\n", " ")
     entry = {"seq": 0, "ts": ts, "level": level, "component": component,
              "message": message, "fields": fields}
     with _LOCK:
@@ -61,19 +63,19 @@ def log(level: str, component: str, message: str, **fields) -> dict | None:
     return entry
 
 
-def debug(component: str, message: str, **f) -> None:
+def debug(component: str, message: str, /, **f) -> None:
     log("DEBUG", component, message, **f)
 
 
-def info(component: str, message: str, **f) -> None:
+def info(component: str, message: str, /, **f) -> None:
     log("INFO", component, message, **f)
 
 
-def warn(component: str, message: str, **f) -> None:
+def warn(component: str, message: str, /, **f) -> None:
     log("WARN", component, message, **f)
 
 
-def error(component: str, message: str, **f) -> None:
+def error(component: str, message: str, /, **f) -> None:
     log("ERROR", component, message, **f)
 
 
