@@ -37,6 +37,18 @@ def go(body):
     return G.format(body)
 
 
+PH = "<?php\n{}\n"
+LV = "<?php\nclass C extends Controller {{\n  public function f(Request $request) {{\n    {}\n  }}\n}}\n"
+
+
+def php(body):
+    return PH.format(body)
+
+
+def lv(body):
+    return LV.format(body)
+
+
 # (rule, must_hit, code)
 CASES = [
     ("java-sqli-jdbc-statement", True, java('return st.executeQuery("a"+r.getParameter("x"));')),
@@ -107,6 +119,51 @@ CASES = [
     ("go-open-redirect", True, go('http.Redirect(w, r, r.FormValue("x"), 302)')),
     ("go-ssti", True, go('template.New("x").Parse(r.FormValue("x"))')),
 
+    ("go-sqli-query", True, "package m\nfunc h(c *http.Context) {\n\tdb.Client.Raw(\"a\" + c.Query(\"x\"))\n}\n"),
+    ("go-sqli-query", True, "package m\nfunc h(ctx *web.Context) {\n\tdb.Where(\"a=\" + ctx.Param(\"x\"))\n}\n"),
+    ("go-sqli-query", False, "package m\nfunc h(c *http.Context) {\n\tdb.Where(\"a=?\", c.Query(\"x\"))\n}\n"),
+    ("go-sqli-query", False, "package m\nfunc h(cache *Cache) {\n\tdb.Raw(\"a\" + cache.Query(\"x\"))\n}\n"),
+
+    ("php-sqli-query", True, php("mysqli_query($conn, \"select * from t where id=\" . $_GET['id']);")),
+    ("php-sqli-query", True, php("$id = $_POST['id'];\n$pdo->query(\"select * from t where id=$id\");")),
+    ("php-sqli-query", True, lv("return DB::select(\"select * from u where n='\" . $request->input('n') . \"'\");")),
+    ("php-sqli-query", True, lv("return User::whereRaw('n = ' . $request->get('n'))->get();")),
+    ("php-sqli-query", True, php("$x = input('get.x');\nDb::query('select ' . $x);")),
+    ("php-sqli-query", True, php("$this->db->query('select ' . $this->input->get('x'));")),
+    ("php-sqli-query", False, php("mysqli_query($conn, 'select * from t where id=' . intval($_GET['id']));")),
+    ("php-sqli-query", False, php("$s = $pdo->prepare('select * from t where id=?');\n$s->execute([$_GET['id']]);")),
+    ("php-sqli-query", False, php("mysqli_query($conn, \"select * from t where n='\" . mysqli_real_escape_string($conn, $_GET['n']) . \"'\");")),
+    ("php-sqli-query", False, lv("return DB::select('select * from u where n = ?', [$request->input('n')]);")),
+    ("php-command-injection", True, php("system('ping ' . $_GET['h']);")),
+    ("php-command-injection", True, php("$o = shell_exec('ls ' . $_REQUEST['d']);")),
+    ("php-command-injection", False, php("system('ping ' . escapeshellarg($_GET['h']));")),
+    ("php-code-injection", True, php("$f = create_function('', $_POST['code']);")),  # eval / assert are constructs the engine cannot match: sink leads for agents
+    ("php-code-injection", True, php("call_user_func($_GET['f'], 1);")),
+    ("php-code-injection", False, php("eval('return 1;'); $x = $_GET['f'];")),
+    ("php-code-injection-include", True, php("include $_GET['page'] . '.php';")),
+    ("php-code-injection-include", True, php("require_once('pages/' . $_GET['p']);")),
+    ("php-code-injection-include", False, php("include basename($_GET['page']) . '.php';")),
+    ("php-unsafe-deserialization", True, php("$o = unserialize($_COOKIE['s']);")),
+    ("php-unsafe-deserialization", True, php("$o = unserialize(base64_decode($_POST['d']));")),
+    ("php-ssrf-request", True, php("$h = curl_init($_GET['url']);")),
+    ("php-ssrf-request", True, php("$c = curl_init(); curl_setopt($c, CURLOPT_URL, $_GET['url']);")),
+    ("php-ssrf-request", True, php("echo_it(file_get_contents($_GET['u']));")),
+    ("php-ssrf-request", False, php("$b = file_get_contents('php://input');")),
+    ("php-path-traversal", True, php("readfile('/files/' . $_GET['f']);")),
+    ("php-path-traversal", True, php("move_uploaded_file($_FILES['f']['tmp_name'], 'up/' . $_FILES['f']['name']);")),
+    ("php-path-traversal", True, php("unlink($_POST['f']);")),
+    ("php-path-traversal", False, php("readfile('/files/' . basename($_GET['f']));")),
+    ("php-xss-echo", True, php("echo $_GET['q'];")),
+    ("php-xss-echo", True, php("echo 'hi ' . $_GET['q'];")),
+    ("php-xss-echo", True, php("print($_GET['q']);")),
+    ("php-xss-echo", False, php("echo htmlspecialchars($_GET['q'], ENT_QUOTES);")),
+    ("php-xss-echo", False, php("echo intval($_GET['q']);")),
+    ("php-open-redirect", True, php("header('Location: ' . $_GET['next']);")),
+    ("php-open-redirect", True, lv("return redirect($request->input('next'));")),
+    ("php-open-redirect", False, php("header('Location: /home'); $x = $_GET['next'];")),
+    ("php-ssti", True, php("$t = $twig->createTemplate($_POST['tpl']);")),
+    ("php-ssti", False, php("echo $twig->render('page.twig', ['q' => $_GET['q']]);")),
+
     ("js-sqli-query", True, js("db.query('select ' + req.query.x);")),
     ("js-sqli-query", True, js("db.query(`select ${req.body.x}`, cb);")),
     ("js-sqli-query", True, js("const { id } = req.params; await prisma.$queryRawUnsafe('a' + id);")),
@@ -155,7 +212,7 @@ CASES = [
     ("js-client-redirect", True, "const u = new URLSearchParams(location.search).get('u'); window.location.href = u;"),
     ("js-client-redirect", False, "window.location.href = '/login?u=' + encodeURIComponent(location.href);"),
 ]
-EXT = {"java": ".java", "python": ".py", "go": ".go", "js": ".ts"}
+EXT = {"java": ".java", "python": ".py", "go": ".go", "js": ".ts", "php": ".php"}
 
 
 def main() -> int:

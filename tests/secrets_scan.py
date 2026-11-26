@@ -161,6 +161,7 @@ def main() -> int:
     if not hardcoded.binary():
         print("FAIL: 没有 gitleaks，本套件不允许跳过")
         return 1
+    os.environ["SCAN_TESTS"] = "1"  # values in test code are ranked here; leaving it out is tests/testcode.py
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
         tmp = pathlib.Path(d)
         for fn in (rules, scanning, judging):

@@ -8,17 +8,20 @@ import os
 import pathlib
 import re
 
+from . import testcode
+
 CLASSES = {
     "java": ["sqli", "cmd", "spel", "ssrf", "deser", "path", "xxe", "xss", "redirect"],
     "python": ["sqli", "cmd", "code", "deser", "ssrf", "ssti", "path", "redirect"],
     "go": ["sqli", "cmd", "ssrf", "path", "redirect", "ssti"],
     "js": ["sqli", "nosql", "cmd", "code", "deser", "ssrf", "ssti", "path", "xss", "redirect", "proto"],
+    "php": ["sqli", "cmd", "code", "deser", "ssrf", "ssti", "path", "xss", "redirect"],
 }
 
 _RULE_CLASS = [
     ("nosql", "nosql"), ("prototype", "proto"), ("sqli", "sqli"), ("jdbc", "sqli"), ("command", "cmd"), ("cmd", "cmd"), ("code-injection", "code"),
     ("spel", "spel"), ("ssrf", "ssrf"), ("deser", "deser"), ("objectinputstream", "deser"),
-    ("path-traversal", "path"), ("xxe", "xxe"), ("xss", "xss"), ("redirect", "redirect"), ("ssti", "ssti"),
+    ("path-traversal", "path"), ("xxe", "xxe"), ("xss", "xss"), ("echo", "xss"), ("redirect", "redirect"), ("ssti", "ssti"),
 ]
 
 
@@ -32,12 +35,21 @@ def class_of(rule_id: str) -> str:
 
 def source_files(root: str, lang: str) -> list[pathlib.Path]:
     p = pathlib.Path(root)
-    exts = EXTENSIONS.get(lang, [])
     if p.is_file():
-        return [p] if p.suffix.lower() in exts else []
-    if lang != "js":
-        return [f for f in p.rglob("*") if f.is_file() and f.suffix.lower() in exts]
-    return _scripts(p)[0]
+        return [p] if p.suffix.lower() in EXTENSIONS.get(lang, []) else []
+    test = testcode.skip(root)
+    return [f for f in _all(p, lang) if not test(f.relative_to(p).as_posix())]
+
+
+def test_files(root: str, langs: list[str]) -> int:
+    """Source files left out because they are test code."""
+    p, test = pathlib.Path(root), testcode.skip(root)
+    return sum(test(f.relative_to(p).as_posix()) for lg in langs for f in _all(p, lg)) if p.is_dir() and testcode.skipping(root) else 0
+
+
+def _all(p: pathlib.Path, lang: str) -> list[pathlib.Path]:
+    exts = EXTENSIONS.get(lang, [])
+    return _scripts(p)[0] if lang == "js" else [f for f in p.rglob("*") if f.is_file() and f.suffix.lower() in exts]
 
 
 def _scripts(p: pathlib.Path) -> tuple[list[pathlib.Path], list[pathlib.Path]]:
@@ -66,7 +78,7 @@ def _minified(f: pathlib.Path) -> bool:
 
 
 def excluded(root: str) -> list[str]:
-    """Scripts left out of the audit on purpose, relative to root."""
+    """Generated and vendored scripts, left out of the audit on purpose, relative to root."""
     p = pathlib.Path(root)
     return [f.relative_to(p).as_posix() for f in _scripts(p)[1]] if p.is_dir() else []
 
@@ -139,6 +151,7 @@ def build(root: str, langs: list[str], findings: list[dict],
         "files_unscanned": unscanned,
         "files_failed": failed,
         "files_excluded": excluded(root) if "js" in langs else [],
+        "files_tests": test_files(root, langs),
         "units": units,
     }
 
@@ -148,6 +161,7 @@ EXTENSIONS = {
     "python": [".py"],
     "go": [".go"],
     "js": [".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts", ".vue", ".svelte"],
+    "php": [".php", ".phtml", ".php5", ".php7", ".phps", ".inc"],
 }
 _VENDOR = {"node_modules", "bower_components", ".next", ".nuxt", ".output", ".svelte-kit"}
 _BUILT = re.compile(r"\.(min|bundle|chunk)\.js$|\.d\.ts$", re.I)

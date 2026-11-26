@@ -48,7 +48,7 @@ def add(path: str, name: str = "", **fields) -> dict:
     return {"ok": True, "project": entry, "existed": existed}
 
 
-EDITABLE = ("name", "lang", "jar", "build", "indirect", "note")
+EDITABLE = ("name", "lang", "jar", "build", "indirect", "tests", "note")
 
 
 def edit(pid: str, fields: dict) -> dict:

@@ -11,7 +11,7 @@ import hashlib
 import pathlib
 import re
 
-from . import codeintel, epss, ledger, store
+from . import codeintel, epss, ledger, store, testcode
 from .profile import _walk
 
 DEFAULT_CVSS = 7.0          # HIGH and above
@@ -107,6 +107,9 @@ def _js_usage(root: str, name: str) -> dict:
 
 
 def _usage(root: str, component: dict) -> dict:
+    if (component.get("language") or "").lower() in ("php", "packagist"):
+        # A package name says nothing of its namespace; not finding it proves nothing.
+        return {"used": False, "scanned": 0, "evidence": [], "conclusive": False}
     if (component.get("language") or "").lower() in _JS_LANG:
         return _js_usage(root, (component.get("name") or "").strip())
     return _source_usage(root, _tokens(component))
@@ -122,8 +125,10 @@ def _source_usage(root: str, tokens: list[str], max_files: int = 20000) -> dict:
         return {"used": False, "scanned": 0, "evidence": [], "conclusive": False}
     p = pathlib.Path(root)
     hits: list[str] = []
-    seen, whole = 0, True
+    seen, whole, test = 0, True, testcode.skip(root)
     for f in _walk(p):
+        if p.is_dir() and test(f.relative_to(p).as_posix()):
+            continue  # what only tests import is not used by what is deployed
         if f.suffix.lower() not in _SRC | {".xml", ".jsp", ".gradle", ".yml", ".yaml", ".properties"}:
             continue
         if f.suffix.lower() in _SRC:

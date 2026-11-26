@@ -22,7 +22,7 @@ import re
 import time
 
 from . import (agents, airules, codeintel, decisions, endpoints, gaps as engine_gaps, hardcoded, hunt, logging, pipeline, proc, projects, records, review,
-               store, verdict)
+               store, testcode, verdict)
 
 KINDS = {"brief": "侦察", "chain": "断链续追", "dependency": "依赖 sink 追链", "sink": "sink 反向追链",
          "endpoint": "接口审计", "gap": "补引擎缺口", "secret": "硬编码判真伪", "review": "复核", **hunt.KINDS}
@@ -31,6 +31,7 @@ SINKS_PER_UNIT = 8
 ENDPOINTS_PER_UNIT = 12
 CVES_PER_UNIT = 12
 HITS_PER_UNIT = 5
+REVIEWS_PER_SESSION = 5
 SECRETS_PER_UNIT = 10
 CONCURRENCY = 4
 
@@ -118,7 +119,7 @@ def _chunks(items: list, n: int):
 def plan(path: str, scope: list[str] | None = None) -> list[dict]:
     """Units of work for the current source and engine results, most valuable first."""
     scope = [k for k in ORDER if not scope or k in scope or k == "brief"]
-    root = agents.base_of(path)
+    root, test = agents.base_of(path), testcode.skip(path)
     out: list[dict] = []
 
     def unit(kind, title, items, files, priority, **extra):
@@ -164,9 +165,10 @@ def plan(path: str, scope: list[str] | None = None) -> list[dict]:
                          "evidence": sorted({e for r in part for e in r.get("usage_evidence") or []})[:10]})
     if "sink" in scope:
         known = {(r["file"], r["line"]) for r in sast}
+        judged = _sinks_judged(path, root)
         by: dict[str, list] = {}
         for s in codeintel.sink_sites(path):
-            if (s["file"], s["line"]) not in known:
+            if (s["file"], s["line"]) not in known and f"{s['class']}:{s['line']}" not in judged.get(s["file"], ()):
                 by.setdefault(s["file"], []).append(s)
         heavy = {"cmd", "deserialization", "expression", "code_injection", "ssti", "nosqli"}
         for file, sites in by.items():
@@ -177,7 +179,7 @@ def plan(path: str, scope: list[str] | None = None) -> list[dict]:
     if "endpoint" in scope:
         by = {}
         for e in endpoints.cached(path):
-            if not codeintel._TEST.search(e["file"]):
+            if not test(e["file"]):
                 by.setdefault(e["file"], []).append(e)
         risky = ("文件上传", "命令执行面", "调试接口", "数据导入", "代理/转发", "数据查询", "认证", "管理后台", "文件下载")
         for file, eps in by.items():
@@ -215,6 +217,23 @@ def plan(path: str, scope: list[str] | None = None) -> list[dict]:
             unit("critic", "复查覆盖面", [], [], 9)
             out[-1]["id"] = _digest(root, "critic", data["map"])
     out.sort(key=lambda u: (u["priority"], -len(u["items"]), -len(u["files"])))  # the long ones first: a tail of one leaves slots idle
+    return out
+
+
+def _sinks_judged(path: str, root: pathlib.Path) -> dict[str, set]:
+    """Sink sites already judged, by file, as long as the file has not changed since.
+    How the rest is cut into units may change; what was judged stays judged."""
+    out: dict[str, set] = {}
+    for u in load(path)["units"].values():
+        if u["kind"] != "sink" or u.get("state") != "done":
+            continue
+        file = u.get("file") or u["title"].split("（", 1)[0]
+        try:
+            fresh = (_digest(root, files=[file]) == u["fhash"]) if u.get("fhash") else (root / file).stat().st_mtime < time.mktime(time.strptime(u["at"], "%Y-%m-%d %H:%M:%S"))
+        except (OSError, ValueError, KeyError):
+            fresh = False
+        if fresh:
+            out.setdefault(file, set()).update(u["items"])
     return out
 
 
@@ -262,9 +281,10 @@ def progress(path: str, scope: list[str] | None = None) -> dict:
         elif got == "failed":
             by[u["kind"]]["failed"] += 1
     # Work that is done leaves the plan (a reviewed chain is no longer open): count it too.
-    ids = {u["id"] for u in units}
+    ids, judged = {u["id"] for u in units}, _sinks_judged(path, agents.base_of(path))
     for uid, u in data["units"].items():
-        if uid not in ids and u["kind"] in ("chain", "review", "secret", "gap") and u["state"] == "done" and not u.get("stale"):
+        if uid not in ids and u["kind"] in ("chain", "review", "secret", "gap", "sink") and u["state"] == "done" and not u.get("stale") \
+                and (u["kind"] != "sink" or set(u["items"]) <= judged.get(u.get("file") or u["title"].split("（", 1)[0], set())):
             by[u["kind"]]["total"] += 1
             by[u["kind"]]["done"] += 1
     by["review"]["total"] += len(_due(path, data)) if not scope else 0
@@ -339,6 +359,8 @@ def _finding_errors(f, root: str, i: int) -> tuple[dict | None, str]:
     good, bad = agents.verify(f.get("chain"), root)
     if bad:
         return None, f"findings[{i}]「{f['title'][:40]}」的链核对不上：\n" + "\n".join(bad[:8])
+    if inside := [s["file"] for s in good if testcode.skip(root)(s["file"])]:
+        return None, f"findings[{i}]「{f['title'][:40]}」的链在测试代码里（{inside[0]}）：测试代码不部署，按设置不审，去掉这条或改用生产代码的链"
     if not good:
         return None, f"findings[{i}] 没有 chain"
     if not any(s.get("role") == "sink" for s in good):
@@ -556,7 +578,7 @@ def spec(u: dict, root: str, data: dict) -> dict:
 def _security_files(root: str) -> list[dict]:
     rx = re.compile(r"shiro|security|filter|interceptor|auth|jwt|token|realm|sign|xss|sqlinj|webmvc|cors|gateway|middleware|guard|permission|/router/|axios|sanitize", re.I)
     idx = codeintel.index(root)
-    out = [{"file": f} for f in idx.files if rx.search(f.rsplit("/", 1)[-1]) and not codeintel._TEST.search(f)]
+    out = [{"file": f} for f in idx.files if rx.search(f.rsplit("/", 1)[-1]) and not testcode.is_test(f)]
     base = agents.base_of(root)
     for p in sorted(base.rglob("application*.y*ml"))[:10]:
         if not any(x in p.parts for x in ("target", "build", "node_modules")):
@@ -598,12 +620,25 @@ def _claim(root: str, rec: dict) -> bool:
     def change(d):
         entry = next((s for s in rec["trace"] if s["kind"] == "source"), rec["trace"][0])
         where = f"{entry['file']}:{entry['line']}"
+        sink = _method(root, {"file": rec["file"], "line": rec["line"]})
         for r in d["findings"]:
+            if (r["file"], r["cwe"]) == (rec["file"], rec["cwe"]) and abs(r["line"] - rec["line"]) > 1 and not _stale(r, root) and ":" not in sink \
+                    and _method(root, {"file": r["file"], "line": r["line"]}) == sink:
+                # One method building one unsafe query in several places: one place to fix.
+                if rec["line"] not in r.setdefault("lines", []):
+                    r["lines"].append(rec["line"])
+                if rec["message"] != r["message"] and rec["message"] not in r.setdefault("also", []):
+                    r["also"].append(rec["message"])
+                return
             if (r["file"], r["cwe"]) == (rec["file"], rec["cwe"]) and abs(r["line"] - rec["line"]) <= 1 and not _stale(r, root):
                 first = next((s for s in r["trace"] if s["kind"] == "source"), r["trace"][0])
                 ways = r.setdefault("entries", [])
                 if where != f"{first['file']}:{first['line']}" and where not in ways:
                     ways.append(where)
+                if rec["line"] != r["line"] and rec["line"] not in r.setdefault("lines", []):
+                    r["lines"].append(rec["line"])
+                if rec["message"] != r["message"] and rec["message"] not in r.setdefault("also", []):
+                    r["also"].append(rec["message"])
                 return
             # Another consequence of the same flaw, under another CWE. Who may call it is a different flaw.
             if (r["file"] == rec["file"] and abs(r["line"] - rec["line"]) <= 1 and not _stale(r, root) and (r["cwe"] in _ACCESS) == (rec["cwe"] in _ACCESS)
@@ -638,8 +673,14 @@ def _check_chains(root: str, keys: list[str], data: dict) -> dict:
 def _due(root: str, data: dict | None = None) -> list[dict]:
     """Claims nobody has tried to break yet: {title, keys | rec}."""
     data = data or load(root)
-    out = [{"id": r["suppress_key"], "title": r["message"][:60], "rec": r} for r in findings(root)
-           if r["status"] == verdict.NEEDS_REVIEW and not r.get("review") and not r.get("decision")]
+    open_: dict[tuple, list] = {}
+    for r in findings(root):
+        if r["status"] == verdict.NEEDS_REVIEW and not r.get("review") and not r.get("decision"):
+            open_.setdefault((r["file"].rsplit("/", 1)[0] if "/" in r["file"] else "", records.family(r)), []).append(r)
+    # One kind of flaw in one layer is mostly the same code read again (a shared helper, the same
+    # pattern per table): one reviewer, a verdict for each. The agents' own wording varies too much.
+    out = [{"id": part[0]["suppress_key"], "title": part[0]["message"][:60] + (f" 等 {len(part)} 条" if len(part) > 1 else ""), "recs": part}
+           for rs in open_.values() for part in _chunks(sorted(rs, key=lambda r: (r["file"], r["line"])), REVIEWS_PER_SESSION)]
     by: dict[str, list] = {}
     for key, c in data["chains"].items():
         by.setdefault(c["rec"]["rule_id"] if c["rec"]["rule_id"].startswith("ai-") else key, []).append(key)
@@ -651,13 +692,24 @@ def _due(root: str, data: dict | None = None) -> list[dict]:
 def _review_one(job: dict, root: str) -> bool:
     data = load(root)
     proc.stage(f"复核：{job['title'][:40]}")
-    res = _check_chains(root, job["keys"], data) if "keys" in job else _reviewed(job["rec"], root, data)
+    res = _check_chains(root, job["keys"], data) if "keys" in job else _reviewed_together(job["recs"], root, data)
 
     def spend(d):
         for k in ("in", "out", "cached"):
             d["usage"][k] = d["usage"].get(k, 0) + (res.get("usage") or {}).get(k, 0)
     _update(root, spend)
     return res["verdict"] != "unavailable"
+
+
+def _reviewed_together(recs: list[dict], root: str, data: dict) -> dict:
+    spent, ok = {"in": 0, "out": 0, "cached": 0}, False
+    for rec, res in zip(recs, review.several(recs, root, _context(data))):
+        for k in spent:
+            spent[k] += (res.get("usage") or {}).get(k, 0)
+        if res["verdict"] != "unavailable":
+            review.put(rec["suppress_key"], res)
+            ok = True
+    return {"usage": spent, "verdict": "ok" if ok else "unavailable"}
 
 
 def _reviewed(rec: dict, root: str, data: dict) -> dict:
@@ -781,6 +833,8 @@ def _work(u: dict, root: str) -> None:
     data = load(root)
     began = time.time()
     entry = {k: u[k] for k in ("id", "kind", "title", "items")}
+    if u["kind"] == "sink":  # judged on this content; see _sinks_judged
+        entry.update(file=u["files"][0], fhash=_digest(agents.base_of(root), files=u["files"][:1]))
     usage = {"in": 0, "out": 0, "cached": 0}
 
     def save(**more):
@@ -1007,7 +1061,7 @@ def _result(root: str, scope, done: int, stopped: str) -> dict:
     gaps = [f"{b['label']}还有 {b['total'] - b['done']} 个单元没有完成" + (f"（{b['failed']} 个失败）" if b["failed"] else "")
             for b in p["by"].values() if b["total"] > b["done"]]
     gaps += load(root)["rule_gaps"]
-    if due := sum(len(j.get("keys") or [1]) for j in _due(root)):
+    if due := sum(len(j.get("keys") or j.get("recs") or [1]) for j in _due(root)):
         gaps.append(f"{due} 条发现还没有独立复核")
     if stopped:
         gaps.insert(0, f"连续失败，已停止：{stopped[:160]}")

@@ -14,11 +14,11 @@ import re
 import subprocess
 import tempfile
 
-from . import hardcoded, ledger, nvd, profile, projects, sfc, store
+from . import hardcoded, ledger, nvd, profile, projects, sfc, store, testcode
 from .engines import opengrep
 
 MAX_RULES, MAX_HITS = 12, 150
-LANGS = {"java": ".java", "kotlin": ".kt", "python": ".py", "go": ".go", "javascript": ".js", "typescript": ".ts"}
+LANGS = {"java": ".java", "kotlin": ".kt", "python": ".py", "go": ".go", "javascript": ".js", "typescript": ".ts", "php": ".php"}
 SEVERITY = {"critical": "ERROR", "high": "ERROR", "medium": "WARNING", "low": "INFO"}
 _KEYS = {"id", "message", "severity", "languages", "mode", "options", "metadata", "pattern", "patterns", "pattern-either", "pattern-regex",
          "pattern-not", "pattern-not-regex", "pattern-inside", "pattern-not-inside", "pattern-sources", "pattern-sinks",
@@ -93,7 +93,7 @@ def run_sast(rules: list[dict], target: str, timeout: int = 170) -> dict:
         parts = [p for p in ledger.source_files(target, "js") if p.suffix.lower() in sfc.EXTENSIONS] if js else []
         with sfc.Shadow(parts) as shadow:
             return shadow.restore(opengrep.run_scan(target, rules=str(f), timeout_s=timeout, also=[shadow.dir] if shadow.dir else [],
-                                                    exclude=["/" + x for x in ledger.excluded(target)] if js else []))
+                                                    exclude=["/" + x for x in [*testcode.paths(target), *(ledger.excluded(target) if js else [])]]))
 
 
 def _sast(raw: list, root: str) -> tuple[list[dict], list[str]]:

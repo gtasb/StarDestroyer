@@ -39,6 +39,10 @@ def coordinate(c: dict) -> dict | None:
         name = f"{group}:{name}"
     elif eco == "npm" and group and not name.startswith("@"):
         name = f"{group if group.startswith('@') else '@' + group}/{name}" if group.startswith("@") else name
+    elif eco == "Packagist":
+        if group and "/" not in name:
+            name = f"{group}/{name}"
+        name = name.lower()
     elif eco == "PyPI":
         name = re.sub(r"[-_.]+", "-", name).lower()
     version = c["version"]

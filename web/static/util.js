@@ -120,7 +120,7 @@ export const STATUS = { confirmed: ["已确认", "bad"], needs_review: ["待复�
 export const SEV = { critical: ["严重", "bad"], high: ["高", "bad"], medium: ["中", "warn"], low: ["低", "info"], unknown: ["未知", "mute"] };
 export const TASK = { queued: ["排队", "info"], running: ["运行中", "info live"], done: ["完成", "good"], failed: ["失败", "bad"], cancelled: ["已取消", "mute"], interrupted: ["已中断", "bad"] };
 export const KIND = { sast: "源码", secrets: "硬编码", triage: "依赖", graph: "攻击面", tabby: "调用链", agent: "agent" };
-export const LANGS = [["auto", "自动"], ["java", "Java"], ["python", "Python"], ["go", "Go"], ["js", "JavaScript / TypeScript"]];
+export const LANGS = [["auto", "自动"], ["java", "Java"], ["python", "Python"], ["go", "Go"], ["js", "JavaScript / TypeScript"], ["php", "PHP"]];
 export const statusChip = s => chip(...(STATUS[s] || [s, ""]));
 export const sevChip = s => chip(...(SEV[s] || SEV.unknown));
 export const stamp = s => s && /^\d{8}-\d{6}/.test(s) ? `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)} ${s.slice(9, 11)}:${s.slice(11, 13)}` : (s || "—");

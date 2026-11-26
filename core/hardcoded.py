@@ -15,7 +15,7 @@ import shutil
 import subprocess
 import tempfile
 
-from . import ledger, logging, proc, profile, records, verdict
+from . import ledger, logging, proc, profile, records, testcode, verdict
 
 MAX_BYTES = 2_000_000
 _CONFIG = {".yml", ".yaml", ".properties", ".ini", ".conf", ".cfg", ".toml", ".env", ".json", ".xml", ".sh", ".bat", ".ps1", ".gradle", ".tf", ".sql"}
@@ -220,6 +220,9 @@ def _hide(text: str, values: list[str]) -> str:
     return text
 
 
+_left: dict[str, int] = {}  # hits in test code, left out by the setting
+
+
 def collect(path: str) -> tuple[list[dict], list[str]]:
     """Records with masked values, and what was not looked at."""
     root = pathlib.Path(path).resolve()
@@ -238,6 +241,9 @@ def collect(path: str) -> tuple[list[dict], list[str]]:
             mine.append({**{k: h[k] for k in ("rule", "cwe", "severity", "what", "key", "value", "line")}, "file": h["rel"], "span": _span(base / h["rel"], h["line"], h["value"]), "engine": "ai"})
         except (OSError, IndexError):
             gaps.append("有一条 AI 规则的结果无法定位")
+    test = testcode.skip(root)
+    _left[str(root)] = len({(h["file"], h["line"]) for h in theirs + mine if test(h["file"])})
+    theirs, mine = [h for h in theirs if not test(h["file"])], [h for h in mine if not test(h["file"])]
     # One value on one line is one finding; gitleaks knows better what it is.
     hits: dict[tuple, dict] = {}
     for h in theirs + mine:
@@ -287,7 +293,7 @@ def scan(path: str) -> dict:
     out["findings_json"] = str(d / "findings.json")
     return {"ok": True, "complete": not gaps, "incomplete_reasons": gaps, "engine": pathlib.Path(binary()).stem or "rules", "root": str(root.resolve()), "reportable": len(live),
             "by_engine": {e: sum(r["engine"] == e for r in recs) for e in ("gitleaks", "rules", "ai")}, "status_counts": pipeline._counts(recs),
-            "severity_counts": pipeline._severities(live), "top": live[:report.TOP_N], "artifacts": out}
+            "severity_counts": pipeline._severities(live), "tests_skipped": _left.get(str(root.resolve()), 0), "top": live[:report.TOP_N], "artifacts": out}
 
 
 # ---- what an agent may say about them ----------------------------------------------

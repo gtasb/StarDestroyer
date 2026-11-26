@@ -28,6 +28,13 @@ def cause(rec: dict) -> str:
     return rec.get("cause") or _BY_CWE.get(rec.get("cwe") or "") or rec.get("cwe") or "其它"
 
 
+def family(rec: dict) -> str:
+    """The class of flaw, from the CWE alone."""
+    if rec.get("rule_id") == "agent-dependency":
+        return "有漏洞的依赖"
+    return _BY_CWE.get(rec.get("cwe") or "") or rec.get("cwe") or "其它"
+
+
 def _rel(path: str, root: str) -> str:
     if root and pathlib.Path(root).is_file():
         root = str(pathlib.Path(root).parent)

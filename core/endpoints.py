@@ -12,6 +12,7 @@ import pathlib
 import re
 import time
 
+from . import testcode
 from .profile import BUILT, _walk
 
 CAPABILITIES = [
@@ -205,8 +206,10 @@ _GO_WEB = re.compile(r'net/http|gin-gonic|labstack/echo|gofiber|gorilla/mux|go-c
 
 
 def _go(text: str) -> list[tuple[str, str, int]]:
-    if not _GO_WEB.search(text):
-        return []  # x.Get("key") is a map or cache call far more often than a route
+    # x.Get("key") is a map or cache call far more often than a route. A web kit of one's
+    # own copies gin's names, though: several "/path" routes in a file say enough.
+    if not _GO_WEB.search(text) and len(re.findall(r'\.(?:GET|POST|PUT|DELETE|PATCH|Any|Handle|HandleFunc)\s*\(\s*"/', text)) < 2:
+        return []
     text = _blank_comments(text, _C_COMMENT)
     groups: dict[str, str] = {}
     for m in _GO_GROUP.finditer(text):
@@ -300,6 +303,54 @@ def _js(text: str, rel: str = "") -> list[tuple[str, str, int]]:
     return out
 
 
+# ---- PHP ----------------------------------------------------------------------
+_PHP_ROUTE = re.compile(r"\b(?:Route|\$router|\$route|\$app|\$r|\$group|\$routes)\s*(?:::|->)\s*(get|post|put|patch|delete|options|any|match|rule|resource|apiResource|add|map)\s*(?=\()", re.I)
+_PHP_PREFIX = re.compile(r"\b(?:Route|\$router)\s*(?:::|->)\s*(?:prefix|group)\s*(?=\()")
+_PHP_ATTR = re.compile(r"#\[\s*Route\s*(?=\()|@Route\s*(?=\()")
+_PHP_INPUT = re.compile(r"\$_(?:GET|POST|REQUEST|FILES|COOKIE)\b|php://input")
+
+
+def _php(text: str, rel: str = "") -> list[tuple[str, str, int]]:
+    """Laravel / Lumen / ThinkPHP / Slim routes, Symfony attributes, and plain scripts that read the request."""
+    code = _blank_comments(text, re.compile(r'"(?:\\.|[^"\\\n])*"|\'(?:\\.|[^\'\\\n])*\'|/\*(?!\*\s*@Route).*?\*/|//[^\n]*', re.S))
+    out, spans = [], []
+    # Route::prefix('api')->group(function () { ... }): what is inside gets the prefix.
+    for m in _PHP_PREFIX.finditer(code):
+        args, end = _args(code, m.end())
+        s = [x for x in _strings(args) if not x.startswith(("App\\", "\\"))]
+        g = re.compile(r"\s*(?:->\s*\w+\s*\([^()]*\)\s*)*->\s*group\s*(?=\()").match(code, end)
+        if s and g:
+            _, close = _args(code, g.end())
+            spans.append((g.end(), close, s[0]))
+    prefix = lambda at: "/".join(x.strip("/") for st, en, x in spans if st <= at < en and x.strip("/"))
+    for m in _PHP_ROUTE.finditer(code):
+        args, _ = _args(code, m.end())
+        s = _strings(args)
+        verb = m.group(1).lower()
+        if verb == "match" and len(s) >= 1:
+            verbs = re.findall(r"['\"](\w+)['\"]", args.split("]", 1)[0])
+            path = next((x for x in s if x not in verbs), "")
+            verb = "/".join(v.upper() for v in verbs) or "ANY"
+        elif verb in ("rule", "add", "map"):
+            path = s[0] if s else ""
+            verb = next((x.upper() for x in s[1:] if x.upper() in ("GET", "POST", "PUT", "DELETE", "PATCH")), "ANY")
+        else:
+            path = s[0] if s else ""
+            verb = {"any": "ANY", "resource": "ANY", "apiresource": "ANY"}.get(verb, verb.upper())
+        if s:
+            out.append((verb, "/" + _join(prefix(m.start()), path).lstrip("/"), m.start()))
+    for m in _PHP_ATTR.finditer(code):
+        args, _ = _args(code, m.end())
+        s = _strings(args)
+        verbs = re.findall(r"['\"](GET|POST|PUT|DELETE|PATCH)['\"]", args)
+        if s and s[0].startswith("/"):
+            out.append(("/".join(verbs) or "ANY", s[0], m.start()))
+    if not out and rel and (hit := _PHP_INPUT.search(code)):
+        # No router: the file is the endpoint.
+        out.append(("ANY", "/" + rel, hit.start()))
+    return out
+
+
 _EXTRACT = {".java": _java, ".kt": _java, ".py": _py, ".go": _go}
 _JS_EXT = (".js", ".mjs", ".cjs", ".ts", ".mts", ".cts", ".jsx", ".tsx")
 
@@ -308,9 +359,15 @@ def scan(root: str, limit_files: int = 20000) -> dict:
     """{endpoints, files, truncated}."""
     p = pathlib.Path(root)
     out, seen, truncated = [], 0, False
+    test = testcode.skip(root)
     for f in _walk(p) if p.is_dir() else ([p] if p.is_file() else []):
+        if p.is_dir() and test(f.relative_to(p).as_posix()):
+            continue
         extract_file = _EXTRACT.get(f.suffix.lower())
-        if f.suffix.lower() in _JS_EXT and not BUILT.search(f.name):
+        if f.suffix.lower() in (".php", ".phtml"):
+            rel = f.relative_to(p if p.is_dir() else p.parent).as_posix()
+            extract_file = lambda text, rel=rel: _php(text, "" if rel.startswith(("vendor/", "routes/")) or "/vendor/" in rel else rel)
+        elif f.suffix.lower() in _JS_EXT and not BUILT.search(f.name):
             rel = f.relative_to(p if p.is_dir() else p.parent).as_posix()
             extract_file = lambda text, rel=rel: _js(text, rel)
         if not extract_file:

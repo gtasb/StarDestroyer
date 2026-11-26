@@ -8,7 +8,7 @@ const GROUPS = [
   ["依赖", [["SCA_INDIRECT", "间接依赖", "扫描依赖的依赖，默认扫描", [["", "默认（扫描）"], ["1", "扫描"], ["0", "不扫描，只看直接依赖"]]],
     ["SCA_MAVEN", "Maven 仓库", "还原父 POM 和间接依赖用；默认 Maven Central，可填镜像 https 地址，0 关闭。公开构件的坐标会发给它，自家 groupId 的不发"], ["POM_ROOTS", "POM 查找目录", "私有父 POM 在本机哪里，分号分隔；默认找项目旁边的仓库"],
     ["SCA_OSV", "OSV 批量查询", "会收到依赖的名字和版本；关掉后只用 NVD，慢很多", [["", "默认（开）"], ["1", "开"], ["0", "关"]]]]],
-  ["其他", [["AUDIT_CONCURRENCY", "并行会话数", "agent 审计同时跑几个，默认 4"], ["REVIEW_MAX", "单次复核上限", "默认 20"],
+  ["其他", [["SCAN_TESTS", "测试代码", "src/test、tests、*_test.go、*.spec.ts 等；src/main 下的都算生产代码", [["", "默认（忽略）"], ["0", "忽略"], ["1", "一起审"]]], ["AUDIT_CONCURRENCY", "并行会话数", "agent 审计同时跑几个，默认 4"], ["REVIEW_MAX", "单次复核上限", "默认 20"],
     ["AUDIT_INTERFILE_DEPTH", "跨文件深度", "引擎，默认 20；更深的由 agent 续追"], ["SD_LOG_LEVEL", "日志级别", "DEBUG / INFO / WARN / ERROR"]]],
 ];
 const ACCESS_NOTE = {

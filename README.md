@@ -1,7 +1,7 @@
 # StarDestroyer
 
 源码安全审计 agent。审计由 agent 在完整源码上进行，引擎负责给线索；
-Java / Kotlin / Python / Go / JavaScript / TypeScript / Vue / Svelte 源码，Java 编译产物走调用图召回。agent 跑在 DeepSeek Harness（dsh）上。
+Java / Kotlin / Python / Go / PHP / JavaScript / TypeScript / Vue / Svelte 源码，Java 编译产物走调用图召回。agent 跑在 DeepSeek Harness（dsh）上。
 
 ## 能力
 
@@ -73,6 +73,7 @@ python web/run.py          # http://127.0.0.1:8770
 | `SCA_MAVEN` | 还原 POM 用的仓库，默认 Maven Central；可填镜像的 https 地址，`0` 关闭 |
 | `POM_ROOTS` | 私有父 POM 在本机的目录，默认找项目旁边的仓库 |
 | `AUDIT_INTERFILE_DEPTH` | 引擎跨文件追多深，默认 20 |
+| `SCAN_TESTS` | 测试代码默认忽略，`1` 一起审；项目设置可另选 |
 | `SCA_INDIRECT` | `0` 不扫间接依赖（依赖的依赖），默认扫；项目设置和单次扫描可另选 |
 
 MCP 接入：`python adapters/mcp_server.py`（stdio），共 30 个工具。
@@ -192,6 +193,25 @@ git 历史不扫：在不可信的仓库里跑 `git log -p` 会执行它配置�
 - **编译会执行项目自带的构建脚本和插件，等于在本机运行它的代码**，并联网下载依赖；环境里不带本项目的 API key，
   但这不是沙箱。默认关闭，只对信任的项目打开。
 
+## PHP
+
+- 污点规则：超全局变量（`$_GET` 等）、`php://input`，Laravel / Symfony / ThinkPHP / Yii / CodeIgniter 的取参，到 SQL、命令、文件包含、反序列化、SSRF、文件、输出、跳转、模板；跨文件可追。
+- 接口：Laravel / Lumen / ThinkPHP 路由（含 `prefix()->group()`）、Symfony `#[Route]` / `@Route`；没有路由的脚本，读请求参数的文件本身就是入口。
+- 依赖：`composer.lock`（`packages-dev` 视为测试依赖），没有锁文件时只取 `composer.json` 里的精确版本；OSV 按 Packagist 查。
+- `eval`、`assert` 是语言结构，引擎匹配不到，由代码导航列为 sink 线索交给 agent 反向追。
+- 杀毒软件可能把像 webshell 的文件直接隔离（删除），扫描前留意，被删的文件不会出现在结果里。
+
+## Go 的自研框架
+
+内置规则认 net/http、gin、echo、fiber 的取参；自研框架多半沿用 gin 的方法名，`c` / `ctx` / `context` 上的
+`Query`、`Param`、`PostForm`、`GetHeader` 等也算外部输入。路由在识别不出框架时，只要一个文件里有两处以上 `.GET("/...")` 这样的注册就会提取。
+
+## 测试代码
+
+默认不审：`test` / `tests` / `__tests__` / `e2e` 等目录，`*_test.go`、`*.spec.ts`、`*.test.tsx`、`test_*.py`、`conftest.py` 等文件。
+`src/main` 下的一律算生产代码，包名叫 `test` 也照审。源码扫描、硬编码、接口、sink 线索、依赖引用、AI 写的规则和 agent 的发现都按这个来；
+agent 仍可读测试代码来理解用法。跳过的数量显示在「发现」和「硬编码」页。点名扫单个文件时不跳过。
+
 ## 依赖版本怎么定
 
 Maven 的版本由父 POM 链和导入的 BOM 决定，间接依赖也一样。父 POM 在私服时，只看工程会拿到别的库顺带声明的版本，
@@ -240,6 +260,7 @@ python tests/rules.py             # 每条规则必须命中漏洞样例、不�
 python tests/secrets_scan.py      # 硬编码：命中、打码、关不掉、判真伪，离线，需 gitleaks
 python tests/maven.py             # 父 POM / BOM 还原、推测版本、跨文件深度，离线
 python tests/audit_flow.py        # 审计的调度、落盘、重试、合并复核、根因分组，离线
+python tests/testcode.py          # 默认忽略测试代码，不漏生产代码，离线，需 Opengrep 与 gitleaks
 python tests/resume.py            # 断点续扫、任务继续、间接依赖开关，离线
 python tests/chat.py              # 项目对话：流式、停止、重启、续接、守卫，离线
 python tests/engine_gaps.py       # 引擎缺口由谁补、补完才关，OSV / NVD 回退，离线

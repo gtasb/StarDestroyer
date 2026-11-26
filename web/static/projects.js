@@ -59,6 +59,7 @@ export function projectForm(existing, done) {
   const how = select([["jar", "指定 jar 或 classes 目录"], ["build", "自动编译（Maven / Gradle）"]], mode, v => { mode = v; drawProduct(); }, { "aria-label": "编译产物" });
   drawProduct();
   const lang = select(LANGS, p.lang || "auto", null, { "aria-label": "语言" });
+  const tests = select([["", "按全局设置"], ["0", "忽略"], ["1", "一起审"]], p.tests || "", null, { "aria-label": "测试代码" });
   const indirect = select([["", "按全局设置"], ["1", "扫描"], ["0", "不扫描，只看直接依赖"]], p.indirect || "", null, { "aria-label": "间接依赖" });
   const form = h("div", { class: "form" },
     field("项目路径", h("div", { class: "row" }, path, !existing && btn("浏览", () => pickPath(v => { path.value = v; }, { start: path.value }), { ico: "folder" })),
@@ -67,9 +68,10 @@ export function projectForm(existing, done) {
     field("语言", lang, "自动：扫描全部受支持的语言"),
     field("编译产物", h("div", { class: "stack" }, how, product), "Java 调用链（Tabby）需要字节码"),
     field("间接依赖", indirect, "依赖的依赖；关掉后不查它们的 CVE"),
+    field("测试代码", tests, "不部署的代码，忽略时会显示跳过了多少"),
     field("备注", note));
   modal(existing ? "编辑项目" : "新建项目", form, close => [btn("取消", close), btn(existing ? "保存" : "创建", async () => {
-    const data = { name: name.value.trim(), lang: lang.value, jar: jar.value.trim(), build: mode === "build" ? "auto" : "", indirect: indirect.value, note: note.value.trim() };
+    const data = { name: name.value.trim(), lang: lang.value, jar: jar.value.trim(), build: mode === "build" ? "auto" : "", tests: tests.value, indirect: indirect.value, note: note.value.trim() };
     const d = await attempt(existing ? patch(`/api/projects/${p.id}`, data) : post("/api/projects", { ...data, path: path.value.trim() }), existing ? "已保存" : null);
     if (!d) return;
     close();
@@ -240,7 +242,7 @@ export function projectPage(root, pid, tab = "overview", run = "") {
     a.covered = d.covered;
     if (tab === "triage") return put(body, oldRun(), triageView(pid, a, deep || {}));
     if (tab === "graph") return put(body, oldRun(), surfaceView(pid, a, deep || {}));
-    const meta = tab === "sast" ? coverage(a) : tab === "secrets" ? h("div", { class: "meta" }, `gitleaks ${a.by_engine.gitleaks} · 自建规则 ${a.by_engine.rules} · AI 规则 ${a.by_engine.ai || 0} · 值已打码，真假由 agent 判断（agent 审计的「硬编码判真伪」）`) : h("div", { class: "meta" }, `${a.mode === "web" ? "Web 入口" : "反序列化入口"} · 方法 ${a.graph.methods} · 调用边 ${a.graph.calls} · 多态边 ${a.graph.aliases ?? 0} · 最深 ${a.max_depth} 跳 · 候选链 ${a.chains_total ?? a.chains}`);
+    const meta = tab === "sast" ? coverage(a) : tab === "secrets" ? h("div", { class: "meta" }, `gitleaks ${a.by_engine.gitleaks} · 自建规则 ${a.by_engine.rules} · AI 规则 ${a.by_engine.ai || 0}${a.tests_skipped ? ` · 测试代码里另有 ${a.tests_skipped} 处，按设置忽略` : ""} · 值已打码，真假由 agent 判断（agent 审计的「硬编码判真伪」）`) : h("div", { class: "meta" }, `${a.mode === "web" ? "Web 入口" : "反序列化入口"} · 方法 ${a.graph.methods} · 调用边 ${a.graph.calls} · 多态边 ${a.graph.aliases ?? 0} · 最深 ${a.max_depth} 跳 · 候选链 ${a.chains_total ?? a.chains}`);
     const owes = tab === "sast" && !run && agentOwes(info.project.audit);
     put(body, oldRun(), meta, owes && h("p", { class: "c-warn" }, owes), findingsView({ project: info.project, kind: tab === "sast" && !run ? "sast,agent" : tab, run, artifact: owes ? { ...a, complete: false } : a }).el);
   }
@@ -251,6 +253,7 @@ export function projectPage(root, pid, tab = "overview", run = "") {
     return h("div", { class: "cov" },
       h("div", { class: "cov-bar" }, part(c.units_covered, "good", "已覆盖"), part(c.units_candidate, "bad", "有命中"), part(c.units_blocked, "warn", "解析失败"), part(c.units_skipped, "mute", "未扫描")),
       h("div", { class: "meta" }, `引擎：${a.language} · ${c.files} 个文件 · ${c.units_total} 个检查单元（文件 × 漏洞类别）：已覆盖 ${c.units_covered}，有命中 ${c.units_candidate}`,
+        c.tests > 0 && h("span", { title: "src/test、tests、*_test.go、*.spec.ts 等，项目设置里可改" }, ` · 忽略测试代码 ${c.tests} 个文件`),
         c.excluded > 0 && h("span", { title: "node_modules、构建产物、压缩文件、类型声明" }, ` · 跳过 ${c.excluded} 处第三方与构建产物`), missed > 0 && h("b", { class: "c-warn" }, `，未覆盖 ${missed}`), ` · 用时 ${dur(a.elapsed_s)}`,
         (a.generated_rules || []).length > 0 && ` · 项目规则 ${a.generated_rules.length} 条`));
   }

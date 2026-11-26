@@ -28,8 +28,8 @@ def opensca_bin() -> str:
                 return str(cand)
     return ""
 
-_BUILD = ("pom.xml", "build.gradle", "requirements.txt", "package.json")
-_MANIFESTS = {*_BUILD, "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "go.mod", "go.sum", "pyproject.toml", "poetry.lock", "settings.gradle"}
+_BUILD = ("pom.xml", "build.gradle", "requirements.txt", "package.json", "composer.json")
+_MANIFESTS = {*_BUILD, "composer.lock", "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "go.mod", "go.sum", "pyproject.toml", "poetry.lock", "settings.gradle"}
 
 
 def available() -> bool:
@@ -107,8 +107,38 @@ def builtin(root: str) -> dict:
                 if m:
                     comps.append({"vendor": "", "name": m.group(1), "version": m.group(2) or "",
                                   "language": "Python", "direct": True, "paths": [str(req)]})
-    comps += _npm(p)
+    comps += _npm(p) + _composer(p)
     return {"ok": True, "components": comps, "task": {"error": "builtin parser"}}
+
+
+def _composer(root: pathlib.Path) -> list[dict]:
+    """PHP packages: what composer.lock resolved, else what composer.json pins exactly."""
+    out = []
+    for f in _walk(root) if root.is_dir() else []:
+        if f.name != "composer.json" or "vendor" in f.relative_to(root).parts:
+            continue
+        try:
+            want = json.loads(f.read_text(encoding="utf-8", errors="replace"))
+            lock = json.loads((f.parent / "composer.lock").read_text(encoding="utf-8", errors="replace")) if (f.parent / "composer.lock").is_file() else {}
+        except (OSError, ValueError):
+            continue
+        direct = {k.lower() for sec in ("require", "require-dev") for k in (want.get(sec) or {})} if isinstance(want, dict) else set()
+        got = [(p, "") for p in lock.get("packages") or []] + [(p, "test") for p in lock.get("packages-dev") or []] if isinstance(lock, dict) else []
+        for pkg, scope in got:
+            name = str(pkg.get("name") or "")
+            if "/" in name:
+                vendor, _, short = name.partition("/")
+                out.append({"vendor": vendor, "name": short, "version": str(pkg.get("version") or "").lstrip("v"), "language": "PHP", "direct": name.lower() in direct,
+                            "paths": [str(f.parent / "composer.lock")], **({"scope": "test"} if scope else {})})
+        if not got:
+            for sec in ("require", "require-dev"):
+                for name, spec in ((want.get(sec) or {}) if isinstance(want, dict) else {}).items():
+                    if "/" in name:  # php, ext-*: the platform, not a package
+                        vendor, _, short = name.partition("/")
+                        exact = re.fullmatch(r"v?(\d+\.\d+\.\d+[\w.\-]*)", str(spec).strip())
+                        out.append({"vendor": vendor, "name": short, "version": exact.group(1) if exact else "", "language": "PHP", "direct": True, "paths": [str(f)],
+                                    **({"scope": "test"} if sec == "require-dev" else {})})
+    return out
 
 
 def _npm(root: pathlib.Path) -> list[dict]:
@@ -219,6 +249,18 @@ def _opensca(root: str) -> dict:
     if res.get("components"):
         res["components"] = list(uniq.values())
     deps = [c for c in res.get("components") or [] if not c.get("root")]
+    # OpenSCA knows nothing of require-dev; composer.lock does.
+    php = {(c["vendor"], c["name"]): c for c in _composer(pathlib.Path(root))} if pathlib.Path(root).is_dir() else {}
+    if php:
+        for c in deps:
+            if (c.get("language") or "").lower() == "php" and "/" in c["name"] and not c.get("vendor"):
+                c["vendor"], _, c["name"] = c["name"].partition("/")
+            mine = php.get((c.get("vendor"), c["name"]))
+            if mine and mine.get("scope"):
+                c["scope"] = mine["scope"]
+        known = {(c.get("vendor"), c["name"]) for c in deps}
+        res["components"] = (res.get("components") or []) + [c for k, c in php.items() if k not in known]
+        deps = [c for c in res.get("components") or [] if not c.get("root")]
     if res.get("ok") and deps:
         res["source"] = "opensca"
         return res

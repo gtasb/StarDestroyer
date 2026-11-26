@@ -211,13 +211,56 @@ def task(tmp) -> None:
     check("hosts can build", "java_build" in [t[0] for t in toolset.TOOLS] and config.allowed("BUILD_JAVA_HOME"))
 
 
+PHP = {
+    "composer.json": '{"require": {"php": ">=8.1", "laravel/framework": "^10.0", "guzzlehttp/guzzle": "7.4.0"}, "require-dev": {"phpunit/phpunit": "^10"}}',
+    "composer.lock": json.dumps({"packages": [{"name": "laravel/framework", "version": "v10.2.0"}, {"name": "guzzlehttp/guzzle", "version": "7.4.0"}, {"name": "symfony/http-kernel", "version": "v6.2.0"}],
+                                 "packages-dev": [{"name": "phpunit/phpunit", "version": "10.0.1"}]}),
+    "routes/web.php": "<?php\nRoute::get('/users/{id}', [UserController::class, 'show']);\nRoute::prefix('admin')->middleware('auth')->group(function () {\n    Route::post('/export', [ExportController::class, 'run']);\n});\n",
+    "app/Http/Controllers/UserController.php": "<?php\nnamespace App\\Http\\Controllers;\nuse Illuminate\\Http\\Request;\nclass UserController extends Controller\n{\n    public function show(Request $request, $id)\n    {\n"
+        "        return $this->repo()->find($request->input('sort'));\n    }\n\n    private function repo(): Repo\n    {\n        return new Repo();\n    }\n}\n",
+    "app/Repo.php": "<?php\nclass Repo\n{\n    public function find($sort)\n    {\n        # sort by what the caller asked\n        return DB::select('select * from users order by ' . $sort);\n    }\n}\n",
+    "public/legacy/download.php": "<?php\n// old page\n$f = $_GET['file'];\nreadfile('/var/files/' . $f);\n",
+    "tests/Feature/UserTest.php": "<?php\nclass UserTest extends TestCase { public function test_x() { DB::select('select ' . $_GET['x']); } }\n",
+}
+
+
+def php(tmp) -> None:
+    root = put(tmp / "app", PHP)
+    prof = profile.profile(root)
+    check("PHP is a language of its own, with its framework", prof["file_counts"].get("php") == 5 and "laravel" in prof["frameworks"] and "composer.json" in prof["build_files"], prof)
+    r = pipeline.scan(root)
+    hits = sorted((x["rule_id"], x["file"].rsplit("/", 1)[-1], x["line"]) for x in pipeline.last_findings(root))
+    check("the engine follows a request into another file", ("php-sqli-query", "Repo.php", 7) in hits, hits)
+    check("and a plain script", ("php-path-traversal", "download.php", 4) in hits, hits)
+    check("test code stays out", not [h for h in hits if "Test" in h[1]] and r["coverage"]["tests"] == 1, (hits, r["coverage"]))
+    check("complete, with every file counted", r["complete"] and r["coverage"]["files"] == 4 and r["language"] == "php", r)
+    eps = {(e["method"], e["path"]) for e in endpoints.extract(root)}
+    check("routes, group prefixes and scripts that read the request are endpoints", {("GET", "/users/{id}"), ("POST", "/admin/export"), ("ANY", "/public/legacy/download.php")} <= eps, eps)
+    idx = codeintel.index(root)
+    m = idx.method_source("app/Repo.php", 7)
+    check("methods are navigable", m and "function find" in m["source"] and [x["owner"] for x in idx.symbol("Repo.find")["methods"]] == ["Repo"], m)
+    check("comments are not code", not codeintel.blank("# sort by $_GET\n", "php").strip() and codeintel.blank("#[Route('/x')]", "php").startswith("#["))
+    sites = {(s["class"], s["file"], s["line"]) for s in codeintel.sink_sites(root)}
+    check("dangerous calls are leads, eval included", ("sqli", "app/Repo.php", 7) in sites and ("path_traversal", "public/legacy/download.php", 4) in sites, sites)
+    ev = put(tmp / "ev", {"a.php": "<?php\neval($code);\n"})
+    check("what the engine cannot match is a lead for agents", ("code_injection", "a.php", 2) in {(s["class"], s["file"], s["line"]) for s in codeintel.sink_sites(ev)})
+    comps = {(c["vendor"], c["name"], c["version"], c.get("scope", "")) for c in sca.builtin(root)["components"]}
+    check("composer.lock versions, dev packages as test", {("laravel", "framework", "10.2.0", ""), ("guzzlehttp", "guzzle", "7.4.0", ""), ("phpunit", "phpunit", "10.0.1", "test")} <= comps
+          and not [c for c in comps if c[1] == "php"], comps)
+    from core import osv
+    check("OSV knows them by vendor/name", osv.coordinate({"vendor": "guzzlehttp", "name": "guzzle", "version": "7.4.0", "language": "PHP"}) == {"package": {"ecosystem": "Packagist", "name": "guzzlehttp/guzzle"}, "version": "7.4.0"})
+    loose = put(tmp / "loose", {"composer.json": '{"require": {"a/b": "1.2.3", "c/d": "^2.0", "ext-json": "*"}}'})
+    check("without a lock, only exact versions", {(c["name"], c["version"]) for c in sca.builtin(loose)["components"]} == {("b", "1.2.3"), ("d", "")})
+    check("a PHP package not found in the source is not proof", not sca_triage._usage(root, {"name": "guzzle", "language": "PHP"})["conclusive"])
+
+
 def main() -> int:
     if not opengrep.capabilities().get("available"):
         print("FAIL: opengrep 不可用，本套件不允许跳过")
         return 1
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
         tmp = pathlib.Path(d)
-        for fn in (scanning, navigating, packages, compiling, task):
+        for fn in (scanning, navigating, packages, php, compiling, task):
             print(f"-- {fn.__name__}")
             mine = tmp / fn.__name__
             mine.mkdir()

@@ -144,6 +144,64 @@ def together(tmp, dsh) -> None:
     check("lines of one method are one place, for rules an agent wrote only", [(r["rule_id"], r["line"], r.get("lines")) for r in got] == [("ai-x", 3, [4, 5]), ("ai-x", 8, None), ("java-sqli", 4, None), ("java-sqli", 5, None)], got)
 
 
+SVC = '''package a;
+class Svc {
+  Object list(Statement st, String a, String b) throws Exception {
+    st.executeQuery("select " + a);
+    st.executeQuery("select " + b);
+    return st.executeQuery("select " + a + b);
+  }
+  Object other(Statement st, String c) throws Exception {
+    return st.executeQuery("select " + c);
+  }
+}
+'''
+
+
+def redundancy(tmp, dsh) -> None:
+    root = T.app(tmp / "app")
+    (pathlib.Path(root) / "src/a/Svc.java").write_text(SVC, encoding="utf-8")
+    codeintel._CACHE.clear()
+    step = lambda n, q: {"role": "sink", "file": "src/a/Svc.java", "line": n, "quote": q}
+    one = lambda n, q, title, cwe="CWE-89": audit._record({**T.FIND, "title": title, "cwe": cwe, "chain": [T.CHAIN[0], step(n, q)]}, "hunt", root)
+    a = one(4, 'st.executeQuery("select " + a);', "list 拼接 a")
+    check("the first is a finding", audit._claim(root, a))
+    check("the same kind of flaw elsewhere in that method is the same finding", not audit._claim(root, one(5, 'st.executeQuery("select " + b);', "list 拼接 b"))
+          and not audit._claim(root, one(6, 'return st.executeQuery("select " + a + b);', "list 拼接 a+b")))
+    got = [f for f in audit.findings(root) if f["file"] == "src/a/Svc.java"]
+    check("with its other lines and wordings kept", len(got) == 1 and got[0]["lines"] == [5, 6] and got[0]["also"] == ["list 拼接 b", "list 拼接 a+b"], got)
+    check("another method is another finding", audit._claim(root, one(9, 'return st.executeQuery("select " + c);', "other 拼接 c")))
+    check("so is another kind of flaw in the same method", audit._claim(root, one(5, 'st.executeQuery("select " + b);', "list 越权", "CWE-639")))
+
+    recs = [x for x in audit.findings(root) if x["status"] == verdict.NEEDS_REVIEW and not x.get("review")]
+    jobs = audit._due(root)
+    check("what is waiting is reviewed by kind and layer, a few at a time", sorted(len(j["recs"]) for j in jobs if "recs" in j) == [1, 2] and sum(len(j["recs"]) for j in jobs) == len(recs),
+          [(j["title"], len(j.get("recs") or [])) for j in jobs])
+    dsh.play(review=ok({"items": [{"id": "R1", **T.UP}, {"id": "R2", **T.UP, "verdict": "refute"}]}, {"items": [{"id": "R1", **T.UP}]}, T.UP))
+    for j in jobs:
+        audit._review_one(j, root)
+    runs = [x for x in dsh.log()[0] if x["kind"] == "review"]
+    verdicts = sorted((x["line"], x["review"]["verdict"]) for x in audit.findings(root) if x["file"] == "src/a/Svc.java")
+    check("one session per group, a verdict for each", len(runs) == 2 and verdicts == [(4, "uphold"), (5, "uphold"), (9, "refute")] or len(runs) == 2 and {v for _, v in verdicts} == {"uphold", "refute"}, (len(runs), verdicts))
+    check("nothing is left waiting", not audit._due(root))
+
+    root = T.app(tmp / "sinks")
+    dsh.play(brief=ok(T.BRIEF), sink=ok(T.SINK), review=ok(T.UP))
+    audit.run(root, ["sink"])
+    first = [u for u in audit.plan(root, ["sink"]) if u["kind"] == "sink"]
+    check("a judged sink is not planned again", not first, first)
+    real = projects.findings
+    projects.findings = lambda p, k, run="": [{"file": T.X, "line": 8, "status": "needs_review", "rule_id": "ai-x", "message": "m", "trace": []}] if k == "sast" else []
+    regrouped = [u for u in audit.plan(root, ["sink"]) if u["kind"] == "sink"]
+    projects.findings = real
+    check("not even when the engine's findings cut the rest differently", not regrouped, regrouped)
+    p = audit.progress(root, ["sink"])
+    check("and it still counts as done", p["by"]["sink"]["done"] == p["by"]["sink"]["total"] == 1, p["by"]["sink"])
+    (pathlib.Path(root) / T.X).write_text(T.APP[T.X] + "<!-- x -->\n", encoding="utf-8")
+    codeintel._CACHE.clear()
+    check("a changed file is judged again", [u["kind"] for u in audit.plan(root, ["sink"])].count("sink") == 1)
+
+
 def standing(tmp, dsh) -> None:
     root = T.app(tmp / "app")
     f = {**T.FIND, "title": "越权", "cwe": "CWE-639", "auth": "login", "auth_default": "anonymous", "cause": "报表 接口没有归属校验", "chain": [T.CHAIN[0], {"role": "sink", "file": T.I, "line": 4, "quote": "reportMapper.listSorted(sort.trim())"}]}
@@ -181,7 +239,7 @@ def main() -> int:
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
         tmp = pathlib.Path(d)
         dsh = T.Dsh(tmp)
-        for fn in (kept, replies, order, together, standing):
+        for fn in (kept, replies, order, together, redundancy, standing):
             print(f"-- {fn.__name__}")
             mine = tmp / fn.__name__
             mine.mkdir()

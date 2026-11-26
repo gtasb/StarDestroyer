@@ -76,7 +76,7 @@ def _many(spec: dict) -> agents.Task:
         return (None, "\n".join(errors[:10])) if errors else ({"items": got}, "")
     context = spec.get("context") or ""
     item = {**SCHEMA, "required": ["id", *SCHEMA["required"]], "properties": {"id": {"type": "string"}, **SCHEMA["properties"]}}
-    return agents.Task("review", SYSTEM + "\n下面几条是同一条规则的命中，**逐条**独立判断：别处成立不代表这里成立。", (context + "\n\n" if context else "") + "待复核的发现(JSON)：\n"
+    return agents.Task("review", SYSTEM + "\n下面几条是同一类问题，往往在同一层、共用同一段代码：共用部分读一次即可，但**逐条**独立判断，别处成立不代表这里成立。", (context + "\n\n" if context else "") + "待复核的发现(JSON)：\n"
                        + json.dumps([{"id": i, **brief(r)} for i, r in ids.items()], ensure_ascii=False, indent=1)[:40_000],
                        {"type": "object", "required": ["items"], "properties": {"items": {"type": "array", "items": item}}}, validate)
 

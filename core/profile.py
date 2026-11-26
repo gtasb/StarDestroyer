@@ -10,9 +10,10 @@ import re
 import tomllib
 
 _BUILD_NAMES = ("pom.xml", "build.gradle", "build.gradle.kts",
-                "requirements.txt", "pyproject.toml", "go.mod", "build.sbt", "package.json")
+                "requirements.txt", "pyproject.toml", "go.mod", "build.sbt", "package.json", "composer.json")
 _EXT = {".java": "java", ".kt": "java", ".py": "python", ".go": "go",
-        **dict.fromkeys((".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts", ".vue", ".svelte"), "js")}
+        **dict.fromkeys((".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts", ".vue", ".svelte"), "js"),
+        **dict.fromkeys((".php", ".phtml", ".php5", ".php7"), "php")}
 BUILT = re.compile(r"\.(min|bundle|chunk)\.js$|\.d\.ts$", re.I)  # generated, not written
 
 # (pattern over a normalised dependency name, framework family). Names come as
@@ -27,6 +28,8 @@ SIGNALS = [
     (r"gofiber/fiber\b", "fiber"), (r"gorm\.io/gorm\b|jinzhu/gorm\b", "gorm"),
     (r"^express$", "express"), (r"^koa$", "koa"), (r"^fastify$", "fastify"), (r"^@nestjs/core$", "nestjs"), (r"^next$", "next"),
     (r"^nuxt$", "nuxt"), (r"^vue$", "vue"), (r"^react$", "react"), (r"^@angular/core$", "angular"), (r"^svelte$", "svelte"),
+    (r"^laravel/(framework|lumen-framework)$", "laravel"), (r"^topthink/(framework|think)$", "thinkphp"), (r"^symfony/(framework-bundle|http-kernel)$", "symfony"),
+    (r"^yiisoft/yii2?$", "yii"), (r"^codeigniter4?/framework$|^codeigniter/framework$", "codeigniter"), (r"^cakephp/cakephp$", "cakephp"), (r"^doctrine/orm$", "doctrine"),
     (r"^electron$", "electron"), (r"^sequelize$", "sequelize"), (r"^mongoose$", "mongoose"), (r"^knex$", "knex"),
 ]
 SKIP_DIRS = {".git", ".work", "node_modules", "target", "build", "dist", "venv", ".venv",
@@ -70,6 +73,12 @@ def _deps_from(path: pathlib.Path) -> list[str]:
             return []
         return [d.lower() for k in ("dependencies", "devDependencies", "peerDependencies", "optionalDependencies")
                 for d in (doc.get(k) if isinstance(doc, dict) and isinstance(doc.get(k), dict) else {})]
+    if name == "composer.json":
+        try:
+            doc = json.loads(text)
+        except ValueError:
+            return []
+        return [d.lower() for k in ("require", "require-dev") for d in (doc.get(k) if isinstance(doc, dict) and isinstance(doc.get(k), dict) else {}) if "/" in d]
     if name == "go.mod":
         return [m.lower() for m in
                 re.findall(r"^\s*(?:require\s+)?([\w.\-]+\.[\w.\-]+/[\w.\-/]+)\s+v\d", text, re.M)]

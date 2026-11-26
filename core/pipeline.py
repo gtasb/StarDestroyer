@@ -12,7 +12,7 @@ import tempfile
 import time
 import uuid
 
-from . import (checkpoint, decisions, ledger, logging, proc, profile, records, report, review, rulebase, sarif, sfc, store,
+from . import (checkpoint, decisions, ledger, logging, proc, profile, records, report, review, rulebase, sarif, sfc, store, testcode,
                verdict)
 from .engines import opengrep
 
@@ -21,6 +21,7 @@ RULES = {
     "python": "python-taint.yaml",
     "go": "go-taint.yaml",
     "js": "js-taint.yaml",
+    "php": "php-taint.yaml",
 }
 TEMPLATES = pathlib.Path(__file__).resolve().parent / "templates" / "opengrep"
 SCANS_DIR = pathlib.Path(__file__).resolve().parents[1] / ".work" / "scans"
@@ -78,16 +79,21 @@ def _engine(src: str, langs: list[str], extra: list[str]) -> dict:
     with tempfile.TemporaryDirectory(prefix="sd-parts-", ignore_cleanup_errors=True) as d, sfc.Shadow(comps) as shadow:
         parts = _parts(langs, src, extra, pathlib.Path(d))
         text = [pathlib.Path(f).read_bytes() for _, fs in parts for f in fs]
+        away = ["/" + x for x in [*testcode.paths(src), *(ledger.excluded(src) if "js" in langs else [])]]
+        test = testcode.skip(src)
         both = sum(len(ledger.source_files(src, lg)) for lg in langs) <= BIG
-        saved = checkpoint.Checkpoint(src, "sast", checkpoint.fingerprint(src), langs, hashlib.sha256(b"".join(text)).hexdigest(), opengrep.binary(), os.environ.get("AUDIT_INTERFILE_DEPTH") or opengrep.DEPTH, both)
+        saved = checkpoint.Checkpoint(src, "sast", checkpoint.fingerprint(src), langs, hashlib.sha256(b"".join(text)).hexdigest(), opengrep.binary(), os.environ.get("AUDIT_INTERFILE_DEPTH") or opengrep.DEPTH, both, testcode.skipping(src))
         saved.total = len(parts)
         for i, (name, rules) in enumerate(parts, 1):
             got = saved.get(name)
             if got is None:
                 proc.stage(f"污点扫描 {i}/{len(parts)}（{name}）" + (f"，接着上次的 {saved.resumed} 段" if saved.resumed else ""))
                 got = _deep(both, lambda at: opengrep.run_scan(src, rules=rules[0], also=[shadow.dir] if shadow.dir else [], extra_rules=rules[1:],
-                                                               exclude=["/" + x for x in ledger.excluded(src)] if "js" in langs else [], at=at))
+                                                               exclude=away, at=at))
                 got = shadow.restore(got)
+                # A command line only holds so many excludes.
+                got["findings"] = [f for f in got["findings"] if not any(test(x) for x in _ends(f, src))]
+                got["total"] = len(got["findings"])
                 total.setdefault("raw", {})[name] = got.pop("raw", None)
                 if got.get("ok"):
                     saved.put(name, {k: got.get(k) for k in _KEEP})
@@ -96,6 +102,12 @@ def _engine(src: str, langs: list[str], extra: list[str]) -> dict:
         if total["ok"]:
             saved.done()
     return total
+
+
+def _ends(f: dict, src: str) -> list[str]:
+    """Where a flow begins and ends, relative to the project."""
+    steps = [s["file"] for s in f.get("trace") or [] if s.get("file")]
+    return [r for r in (records._rel(x, src) for x in [f["file"], *steps[:1]]) if not pathlib.Path(r).is_absolute()]
 
 
 SHALLOW = "3"
@@ -144,6 +156,8 @@ def scan(src: str, lang: str = "auto", verify: bool = False,
     if not any(ledger.source_files(src, lg) for lg in langs):
         have = "、".join(f"{k} {n} 个" for k, n in present.items()) or "无"
         what = "受支持语言" if lang == "auto" else lang
+        left = ledger.test_files(src, langs)
+        have += f"；其中 {left} 个是测试代码，按设置忽略" if left else ""
         return {"ok": False, "complete": False, "languages": present,
                 "error": f"没有可扫描的 {what} 源文件（检测到：{have}）"}
     lang = "+".join(langs)
@@ -221,7 +235,7 @@ def scan(src: str, lang: str = "auto", verify: bool = False,
         "top": reportable[:report.TOP_N],
         "coverage": {k: ledger_doc[k] for k in
                      ("files", "units_total", "units_covered", "units_candidate",
-                      "units_blocked", "units_skipped")} | {"excluded": len(ledger_doc["files_excluded"])},
+                      "units_blocked", "units_skipped")} | {"excluded": len(ledger_doc["files_excluded"]), "tests": ledger_doc["files_tests"]},
         "verification": verification,
         "previously_rejected": len(prior_rejected),
         "artifacts": out,

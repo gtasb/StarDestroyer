@@ -102,7 +102,8 @@ export function showFinding(f, list, onChange) {
         f.conditions && [h("dt", {}, "利用条件"), h("dd", {}, f.conditions)],
         f.fix && [h("dt", {}, "修复"), h("dd", {}, f.fix)],
         (f.entries || []).length > 0 && [h("dt", {}, "其他入口"), h("dd", { class: "mono" }, f.entries.map(e => h("div", {}, e)))],
-        (f.also || []).length > 0 && [h("dt", {}, "其它后果"), h("dd", {}, f.also.map(e => h("div", {}, e)))],
+        (f.lines || []).length > 0 && [h("dt", {}, "同处另有"), h("dd", { class: "mono" }, f.lines.map(n => h("button", { class: "quote", type: "button", onclick: () => open({ file: f.file, line: n }) }, `${f.file}:${n}`)))],
+        (f.also || []).length > 0 && [h("dt", {}, "其它说法"), h("dd", {}, f.also.map(e => h("div", {}, e)))],
         f.missing && [h("dt", {}, "缺口"), h("dd", {}, [].concat(f.missing).join("、"))],
         f.decision && [h("dt", {}, "人工结论"), h("dd", {}, `${f.reason}（${f.decision.at}）`)]),
       reviewNote(f.review));

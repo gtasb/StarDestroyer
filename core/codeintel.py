@@ -12,7 +12,7 @@ import re
 import threading
 import time
 
-from . import ledger, sfc
+from . import ledger, sfc, testcode
 from .profile import BUILT, _EXT, _walk
 
 SOURCE = _EXT
@@ -29,9 +29,13 @@ _JS_BLANK = re.compile(r'(?:(?<=[=(,:;!&|?{}\[\n])|(?<=return))[ \t]*/(?![*/])(?
                        r'"(?:\\.|[^"\\\n])*"|\'(?:\\.|[^\'\\\n])*\'|/\*.*?\*/|(?<!:)//[^\n]*', re.S)
 
 
+# PHP: # comments too, but #[...] is an attribute.
+_PHP_BLANK = re.compile(r'"(?:\\.|[^"\\\n])*"|\'(?:\\.|[^\'\\\n])*\'|/\*.*?\*/|//[^\n]*|#(?!\[)[^\n]*', re.S)
+
+
 def blank(text: str, lang: str) -> str:
     """Comments and string bodies become spaces; offsets and lines survive."""
-    return {"python": _PY_BLANK, "js": _JS_BLANK}.get(lang, _C_BLANK).sub(lambda m: re.sub(r"[^\n]", " ", m.group(0)), text)
+    return {"python": _PY_BLANK, "js": _JS_BLANK, "php": _PHP_BLANK}.get(lang, _C_BLANK).sub(lambda m: re.sub(r"[^\n]", " ", m.group(0)), text)
 
 
 _JAVA_TYPE = re.compile(r"\b(class|interface|enum|record|object)\s+(\w+)([^{;]*)\{")
@@ -51,6 +55,8 @@ _JS_FUNC = re.compile(r"\bfunction\s*\*?\s*(\w+)\s*(?:<[^>()]*>)?\(|"           
                       r"^[ \t]*(?:(?:public|private|protected|static|async|get|set|override|readonly)\s+)*[*#]?(\w+)\s*(?:<[^>()]*>)?\(|"  # method(
                       r"(?:^|(?<=[{,]))[ \t]*(\w+)\s*:\s*(?:async\s*)?(?:function\b[^(]*)?\(", re.M)                         # name: (..) =>
 _JS_NOT = _NOT_METHOD | {"function", "constructor", "super", "await", "typeof", "delete", "void", "import", "require", "with", "of", "in"}
+_PHP_TYPE = re.compile(r"\b(class|interface|trait|enum)\s+(\w+)([^{;]*)\{")
+_PHP_FUNC = re.compile(r"\bfunction\s+&?(\w+)\s*\(")
 _GO_TYPE = re.compile(r"^type\s+(\w+)\s+(struct|interface)\s*\{", re.M)
 
 
@@ -113,6 +119,8 @@ class File:
             self._go()
         elif self.lang == "js":
             self._js()
+        elif self.lang == "php":
+            self._php()
         elif path.suffix.lower() == ".xml" and "<mapper" in self.text:
             self._mapper()
 
@@ -201,6 +209,23 @@ class File:
             while first > 1 and re.match(r"\s*@\w", self.lines[first - 2]):
                 first -= 1
             self._method(name, self._owner(start), params, first, start, end, True)
+
+    def _php(self) -> None:
+        for m in _PHP_TYPE.finditer(self.code):
+            self.types.append({"name": m.group(2), "kind": m.group(1), "supers": re.findall(r"\b([A-Z]\w+)", m.group(3)), "file": self.rel,
+                               "start": self.line(m.start()), "end": self.line(_close(self.code, m.end() - 1) - 1)})
+        for m in _PHP_FUNC.finditer(self.code):
+            end = _paren(self.code, m.end() - 1)
+            tail = re.compile(r"\s*(?::\s*\??[\w\\|]+)?\s*([{;])").match(self.code, end)
+            if not tail:
+                continue
+            start = self.line(m.start())
+            first = start
+            while first > 1 and re.match(r"\s*(#\[|/\*\*|\*)", self.lines[first - 2]):
+                first -= 1
+            body = tail.group(1) == "{"
+            last = self.line(_close(self.code, tail.end() - 1) - 1) if body else self.line(tail.end())
+            self._method(m.group(1), self._owner(start), self.code[m.end():end - 1], first, start, last, body)
 
     def _mapper(self) -> None:
         ns = re.search(r"<mapper\b[^>]*namespace\s*=\s*[\"']([^\"']+)", self.text)
@@ -361,17 +386,25 @@ SINKS = [
     ("prototype_pollution", "CWE-1321", "js", r"\b(?:_|lodash)\.(?:merge|mergeWith|defaultsDeep|set|setWith)\s*\(|\b(?:\$|jQuery)\.extend\s*\(\s*true\b|\bdeepmerge\s*\("),
     ("dom_xss", "CWE-79", "js", r"\.(?:innerHTML|outerHTML|srcdoc)\s*\+?=(?!=)|\bdocument\.write(?:ln)?\s*\(|\.insertAdjacentHTML\s*\(|\bdangerouslySetInnerHTML\b|\.createContextualFragment\s*\(|\bbypassSecurityTrust\w+\s*\(|\.html\s*\(\s*[^\s)'\"]"),
     ("postmessage", "CWE-346", "js", r"\.postMessage\s*\(|\bonmessage\s*="),
+    ("sqli", "CWE-89", "php", r"\b(?:mysqli?_query|mysqli_multi_query|pg_query|sqlite_query)\s*\(|->(?:query|exec|prepare|multi_query|whereRaw|orWhereRaw|havingRaw|orderByRaw|selectRaw|groupByRaw|createCommand)\s*\(|"
+                               r"\b(?:DB|Db)::(?:select|insert|update|delete|statement|unprepared|raw|query|execute)\s*\(|::(?:whereRaw|selectRaw|orderByRaw)\s*\("),
+    ("cmd", "CWE-78", "php", r"(?<![\w>:$])(?:system|exec|shell_exec|passthru|popen|proc_open|pcntl_exec)\s*\(|`[^`\n]*\$"),
+    ("code_injection", "CWE-94", "php", r"(?<![\w>:$])(?:eval|assert|create_function|call_user_func(?:_array)?)\s*\(|\bpreg_replace\s*\(\s*['\"][^'\"]*/\w*e\w*['\"]|"
+                                        r"\b(?:include|require)(?:_once)?\s*\(?\s*\$"),
+    ("deserialization", "CWE-502", "php", r"(?<![\w>:$])(?:unserialize|yaml_parse|igbinary_unserialize)\s*\(|phar://"),
+    ("ssrf", "CWE-918", "php", r"\bcurl_(?:init|setopt)\s*\(|(?<![\w>:$])(?:file_get_contents|fopen|fsockopen|get_headers)\s*\(\s*\$|\bHttp::(?:get|post|put|send)\s*\("),
+    ("path_traversal", "CWE-22", "php", r"(?<![\w>:$])(?:file_put_contents|readfile|unlink|rmdir|copy|rename|move_uploaded_file|mkdir|file)\s*\(\s*[^)'\"]|->(?:download|extractTo)\s*\("),
+    ("ssti", "CWE-1336", "php", r"->createTemplate\s*\(|['\"]string:|\bBlade::render\s*\("),
     ("path_traversal", "CWE-22", "go", r"\bos\.(?:Open|OpenFile|ReadFile|Create|Remove\w*|WriteFile)\s*\(|\bhttp\.ServeFile\s*\("),
 ]
 _SINK_RX = [(c, w, lang, re.compile(rx)) for c, w, lang, rx in SINKS]
-_TEST = re.compile(r"(^|/)(src/)?test/|(^|/)(tests?|__tests__|__mocks__|e2e|cypress)/|Test\.java$|_test\.(go|py)$|\.(test|spec|stories)\.[cm]?[jt]sx?$")
 
 
 def sink_sites(root: str, classes: set[str] | None = None) -> list[dict]:
     """Every place dangerous APIs are used, mapper ${} included. Leads, not findings."""
-    idx, out = index(root), []
+    idx, out, test = index(root), [], testcode.skip(root)
     for f in idx.files.values():
-        if _TEST.search(f.rel):
+        if test(f.rel):
             continue
         for s in f.statements:
             if classes is None or "sqli" in classes:

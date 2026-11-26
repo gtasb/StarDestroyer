@@ -106,6 +106,7 @@ class ProjectReq(BaseModel):
     jar: str = ""
     build: str = ""
     indirect: str = ""
+    tests: str = ""
     note: str = ""
 
 
@@ -115,6 +116,7 @@ class ProjectEdit(BaseModel):
     jar: str | None = None
     build: str | None = None
     indirect: str | None = None
+    tests: str | None = None
     note: str | None = None
 
 
@@ -237,7 +239,7 @@ def projects_list() -> dict:
 
 @app.post("/api/projects")
 def projects_add(req: ProjectReq) -> dict:
-    return projects.add(req.path, req.name, lang=req.lang, jar=req.jar, build=req.build, indirect=req.indirect, note=req.note)
+    return projects.add(req.path, req.name, lang=req.lang, jar=req.jar, build=req.build, indirect=req.indirect, tests=req.tests, note=req.note)
 
 
 @app.post("/api/projects/delete")

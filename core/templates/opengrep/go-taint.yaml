@@ -31,6 +31,76 @@ rules:
       - pattern: '($C : echo.Context).FormValue(...)'
       - pattern: '($C : *fiber.Ctx).Query(...)'
       - pattern: '($C : *fiber.Ctx).Params(...)'
+      - patterns:
+          - pattern: '$C.Query(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.DefaultQuery(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.Param(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.Params(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.PostForm(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.DefaultPostForm(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.FormValue(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.GetHeader(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.GetQuery(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.QueryParam(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.GetRawData(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.Cookie(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.GetString(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.Input(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
     pattern-sinks:
       - patterns:
           - pattern-either:
@@ -49,6 +119,9 @@ rules:
           - pattern-not: '($C : *gin.Context).Query(...)'
           - pattern-not: '($C : *fiber.Ctx).Query(...)'
           - pattern-not: '$R.URL.Query()'
+          - pattern-not: 'c.Query(...)'
+          - pattern-not: 'ctx.Query(...)'
+          - pattern-not: 'context.Query(...)'
           - focus-metavariable: '$Q'
     pattern-sanitizers:
       - pattern: 'strconv.Atoi(...)'
@@ -89,6 +162,76 @@ rules:
       - pattern: '($C : echo.Context).FormValue(...)'
       - pattern: '($C : *fiber.Ctx).Query(...)'
       - pattern: '($C : *fiber.Ctx).Params(...)'
+      - patterns:
+          - pattern: '$C.Query(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.DefaultQuery(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.Param(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.Params(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.PostForm(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.DefaultPostForm(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.FormValue(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.GetHeader(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.GetQuery(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.QueryParam(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.GetRawData(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.Cookie(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.GetString(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.Input(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
     pattern-sinks:
       - patterns:
           - pattern-either:
@@ -136,6 +279,76 @@ rules:
       - pattern: '($C : echo.Context).FormValue(...)'
       - pattern: '($C : *fiber.Ctx).Query(...)'
       - pattern: '($C : *fiber.Ctx).Params(...)'
+      - patterns:
+          - pattern: '$C.Query(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.DefaultQuery(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.Param(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.Params(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.PostForm(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.DefaultPostForm(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.FormValue(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.GetHeader(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.GetQuery(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.QueryParam(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.GetRawData(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.Cookie(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.GetString(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.Input(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
     pattern-sinks:
       - patterns:
           - pattern-either:
@@ -188,6 +401,76 @@ rules:
       - pattern: '($C : echo.Context).FormValue(...)'
       - pattern: '($C : *fiber.Ctx).Query(...)'
       - pattern: '($C : *fiber.Ctx).Params(...)'
+      - patterns:
+          - pattern: '$C.Query(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.DefaultQuery(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.Param(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.Params(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.PostForm(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.DefaultPostForm(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.FormValue(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.GetHeader(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.GetQuery(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.QueryParam(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.GetRawData(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.Cookie(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.GetString(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.Input(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
     pattern-sinks:
       - patterns:
           - pattern-either:
@@ -243,6 +526,76 @@ rules:
       - pattern: '($C : echo.Context).FormValue(...)'
       - pattern: '($C : *fiber.Ctx).Query(...)'
       - pattern: '($C : *fiber.Ctx).Params(...)'
+      - patterns:
+          - pattern: '$C.Query(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.DefaultQuery(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.Param(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.Params(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.PostForm(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.DefaultPostForm(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.FormValue(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.GetHeader(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.GetQuery(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.QueryParam(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.GetRawData(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.Cookie(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.GetString(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.Input(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
     pattern-sinks:
       - patterns:
           - pattern-either:
@@ -288,6 +641,76 @@ rules:
       - pattern: '($C : echo.Context).FormValue(...)'
       - pattern: '($C : *fiber.Ctx).Query(...)'
       - pattern: '($C : *fiber.Ctx).Params(...)'
+      - patterns:
+          - pattern: '$C.Query(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.DefaultQuery(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.Param(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.Params(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.PostForm(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.DefaultPostForm(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.FormValue(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.GetHeader(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.GetQuery(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.QueryParam(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.GetRawData(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.Cookie(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.GetString(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
+      - patterns:
+          - pattern: '$C.Input(...)'
+          - metavariable-regex:
+              metavariable: '$C'
+              regex: '^(c|ctx|context)$'
     pattern-sinks:
       - patterns:
           - pattern-either:
